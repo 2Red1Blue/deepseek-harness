@@ -213,7 +213,11 @@ function freezeRestoredObject<T extends object>(value: T): T {
 }
 
 /** Validate the fixed event envelope after one-pass JSON materialization. */
-function assertSessionEventEnvelope(value: Record<string, unknown>, index: number): asserts value is SessionEvent {
+function assertSessionEventEnvelope(
+  value: Record<string, unknown>,
+  index: number,
+  externalValidation?: RequiredExternalSessionEventValidation,
+): asserts value is SessionEvent {
   const event = value
   if (event['type'] === 'request/header-delta') {
     throw new Error(`seed event at index ${index} uses unsupported legacy request/header-delta format`)
@@ -249,11 +253,20 @@ function assertSessionEventEnvelope(value: Record<string, unknown>, index: numbe
   } catch {
     throw new Error(`seed event at index ${index} has an invalid requiredExternal marker`)
   }
-  if (requiredExternal !== undefined && event['ignorable'] === true) {
-    throw new Error(`seed event at index ${index} cannot be both ignorable and requiredExternal`)
-  }
-  if (requiredExternal !== undefined && KNOWN_SESSION_EVENT_TYPES.has(type)) {
-    throw new Error(`seed event at index ${index} cannot mark Harness event "${type}" as requiredExternal`)
+  if (requiredExternal !== undefined) {
+    if (event['ignorable'] === true) {
+      throw new Error(`seed event at index ${index} cannot be both ignorable and requiredExternal`)
+    }
+    if (KNOWN_SESSION_EVENT_TYPES.has(type)) {
+      throw new Error(`seed event at index ${index} cannot mark Harness event "${type}" as requiredExternal`)
+    }
+    if (externalValidation === undefined) {
+      throw new Error(`seed event at index ${index} requires an active SessionStore requiredExternal registration`)
+    }
+    const result = externalValidation.validate(requiredExternal, type, event['data'])
+    if (result.kind !== 'valid') {
+      throw new Error(`seed event at index ${index} has no valid requiredExternal registration: ${result.reason}`)
+    }
   }
   switch (type) {
     case 'request/header':
@@ -439,6 +452,20 @@ type RequiredExternalAppender = (type: string, data: unknown, stamp: RequiredExt
 /** Module-private required-external append functions; SessionStore remains the only caller. */
 const requiredExternalAppenders = new WeakMap<Session, RequiredExternalAppender>()
 
+/** Module-private identity for SessionStore restores that own an external-reader snapshot. */
+const restoreRequiredExternal = Symbol('restoreRequiredExternal')
+
+/** Internal static Session capability exposed only through the module-private symbol. */
+interface SessionRestoreInternals {
+  [restoreRequiredExternal](
+    id: SessionId,
+    seed: readonly SessionEvent[],
+    header: SessionHeader,
+    inheritedEventCount: SessionLogOffset,
+    externalValidation: RequiredExternalSessionEventValidation,
+  ): Session
+}
+
 /**
  * An event-sourced session: an append-only log of {@link SessionEvent}s.
  *
@@ -521,6 +548,8 @@ export class Session {
    * Restore a detached session by taking ownership of fresh persistence values.
    * The storage format, event envelopes, sequence continuity, surface transitions,
    * and header fields are validated before the restored objects are frozen.
+   * This public constructor refuses `requiredExternal` records; SessionStore
+   * restores those only through its active reader-registration snapshot.
    * @param id - restored session identity.
    * @param seed - fresh detached events whose ownership is transferred.
    * @param header - fresh detached metadata whose ownership is transferred.
@@ -533,7 +562,18 @@ export class Session {
     header: SessionHeader,
     inheritedEventCount: SessionLogOffset,
   ): Session {
-    return new Session(id, seed, header, 'restore', inheritedEventCount)
+    return Session[restoreRequiredExternal](id, seed, header, inheritedEventCount, undefined)
+  }
+
+  /** Restore persistence input that has the active external-reader snapshot. */
+  private static [restoreRequiredExternal](
+    id: SessionId,
+    seed: readonly SessionEvent[],
+    header: SessionHeader,
+    inheritedEventCount: SessionLogOffset,
+    externalValidation?: RequiredExternalSessionEventValidation,
+  ): Session {
+    return new Session(id, seed, header, 'restore', inheritedEventCount, externalValidation)
   }
 
   private constructor(
@@ -542,6 +582,7 @@ export class Session {
     header?: SessionHeader,
     mode: 'snapshot' | 'restore' = 'snapshot',
     suppliedInheritedEventCount?: SessionLogOffset,
+    externalValidation?: RequiredExternalSessionEventValidation,
   ) {
     const restoredHeader = mode === 'restore'
       ? validateRestoredSessionHeader(id, header)
@@ -561,7 +602,7 @@ export class Session {
         if (snapshot === undefined) {
           throw new Error(`seed event at index ${index} is not losslessly JSON-serializable`)
         }
-        assertSessionEventEnvelope(snapshot, index)
+        assertSessionEventEnvelope(snapshot, index, externalValidation)
         assertSupportedRequestHeader(snapshot.type, snapshot.data, `seed event at index ${index}`)
         if (snapshot.seq !== index) {
           throw new Error(`seed event at index ${index} has seq ${snapshot.seq} (expected ${index}); seed must be contiguous from 0`)
@@ -870,6 +911,23 @@ function appendRegisteredExternalEvent(
   return append(type, data, stamp)
 }
 
+/** Restore persistence input through SessionStore's module-private external-reader capability. */
+function restoreRegisteredExternalSession(
+  id: SessionId,
+  seed: readonly SessionEvent[],
+  header: SessionHeader,
+  inheritedEventCount: SessionLogOffset,
+  externalValidation: RequiredExternalSessionEventValidation,
+): Session {
+  return (Session as unknown as SessionRestoreInternals)[restoreRequiredExternal](
+    id,
+    seed,
+    header,
+    inheritedEventCount,
+    externalValidation,
+  )
+}
+
 /** A fork source: either the live session object or its live store id. */
 export type SessionForkSource = Session | SessionId
 
@@ -923,7 +981,8 @@ export class SessionStore extends Service {
 
   /**
    * Register one plugin-owned required external vocabulary for the lifetime of
-   * its caller's Cordis effect.
+   * its caller's Cordis effect. One event type has one active writer
+   * registration; dispose an older version before registering its replacement.
    * @param registration - namespace, schema version, event types, and payload validators.
    * @returns an idempotent disposer that removes the vocabulary.
    * @throws {TypeError} when the registration cannot identify one external vocabulary.
@@ -1002,8 +1061,9 @@ export class SessionStore extends Service {
    * @param options - seed events and/or creation metadata for the header. With
    *   `seedSource: 'persistence'`, metadata and events must be fresh detached
    *   graphs whose ownership transfers to this call: they are validated and
-   *   frozen in place through {@link Session.fromRestore}, so the caller must
-   *   retain no mutable aliases.
+   *   frozen in place through the store-owned restoration path, and each
+   *   `requiredExternal` record must match this store's active registration.
+   *   The caller must retain no mutable aliases.
    * @returns the constructed session, NOT yet in the store.
    * @throws if a session with `id` already exists, metadata is not a plain
    *   lossless-JSON record with valid scalar fields, or `meta.cwd` is a
@@ -1019,7 +1079,13 @@ export class SessionStore extends Service {
     }
     if (this.store.has(sessionId)) throw new Error(`session "${sessionId}" already exists`)
     if (options?.seedSource === 'persistence') {
-      return Session.fromRestore(sessionId, options.seed, options.meta, options.inheritedEventCount)
+      return restoreRegisteredExternalSession(
+        sessionId,
+        options.seed,
+        options.meta,
+        options.inheritedEventCount,
+        this.requiredExternalEvents.snapshot(),
+      )
     }
     const seed = options?.seed
     const meta = options?.meta

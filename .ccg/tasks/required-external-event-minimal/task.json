@@ -6,7 +6,7 @@
   "risk": "high",
   "domain": "session-persistence",
   "currentPhase": "review",
-  "nextAction": "运行窄范围双模型审查，并将 Roundtable 写入器接入已验证的核心能力",
+  "nextAction": "提交已修复的审查问题并运行最终窄范围双模型审查",
   "createdAt": "2026-09-03T00:00:00+08:00",
   "branch": "codex/required-external-event-minimal"
 }

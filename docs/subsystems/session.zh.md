@@ -203,7 +203,7 @@ type OptionalSessionSeq = SessionSeq | null
 
 ### 必需外部事件读取方
 
-重建状态会受影响的外部插件通过 `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(...))` 注册其精确命名空间、schema 版本、事件类型与同步校验器，然后只能通过 `ctx.sessions.appendRequiredExternalEvent(...)` 写入。持久化信封记录注册标识；冷存储读取要求存在匹配且活跃的注册，并校验载荷。缺失或已释放的注册会拒绝日志，格式错误的标记、无效载荷或异步校验器会导致损坏或写入被拒绝。JSONL 会将读取方注册快照与文件版本一起缓存，因此卸载插件后不会复用曾被接受的日志。
+重建状态会受影响的外部插件通过 `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(...))` 注册其精确命名空间、schema 版本、事件类型与同步校验器，然后只能通过 `ctx.sessions.appendRequiredExternalEvent(...)` 写入。持久化信封记录注册标识；冷存储读取要求存在匹配且活跃的注册，并校验载荷。缺失或已释放的注册会拒绝日志，格式错误的标记、无效载荷或异步校验器会导致损坏或写入被拒绝。只有 `SessionStore.prepare({ seedSource: 'persistence' })` 可以恢复必需外部记录；直接调用 `Session.create()` 与 `Session.fromRestore()` 会拒绝它。JSONL 会将读取方注册快照与文件版本一起缓存，因此卸载插件后不会复用曾被接受的日志。
 
 ```ts type-equiv
 /** Immutable reader identity stamped on one required external Session event. */
@@ -498,6 +498,8 @@ declare class Session {
    * Restore a detached session by taking ownership of fresh persistence values.
    * The storage format, event envelopes, sequence continuity, surface transitions,
    * and header fields are validated before the restored objects are frozen.
+   * This public constructor refuses `requiredExternal` records; SessionStore
+   * restores those only through its active reader-registration snapshot.
    * @param id - restored session identity.
    * @param seed - fresh detached events whose ownership is transferred.
    * @param header - fresh detached metadata whose ownership is transferred.
@@ -884,7 +886,8 @@ Persistence is intentionally not implemented here — the agent lifecycle attach
 ```ts cordis-catalog
 /**
  * Register one plugin-owned required external vocabulary for the lifetime of
- * its caller's Cordis effect.
+ * its caller's Cordis effect. One event type has one active writer
+ * registration; dispose an older version before registering its replacement.
  * @param registration - namespace, schema version, event types, and payload validators.
  * @returns an idempotent disposer that removes the vocabulary.
  * @throws {TypeError} when the registration cannot identify one external vocabulary.
@@ -945,8 +948,9 @@ create(id?: SessionId, options?: CreateSessionOptions): Session
  * @param options - seed events and/or creation metadata for the header. With
  *   `seedSource: 'persistence'`, metadata and events must be fresh detached
  *   graphs whose ownership transfers to this call: they are validated and
- *   frozen in place through {@link Session.fromRestore}, so the caller must
- *   retain no mutable aliases.
+ *   frozen in place through the store-owned restoration path, and each
+ *   `requiredExternal` record must match this store's active registration.
+ *   The caller must retain no mutable aliases.
  * @returns the constructed session, NOT yet in the store.
  * @throws if a session with `id` already exists, metadata is not a plain
  *   lossless-JSON record with valid scalar fields, or `meta.cwd` is a

@@ -1735,7 +1735,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: 'registerRequiredExternalEvents(registration: RequiredExternalSessionEventRegistration): () => void',
-        description: 'Register one plugin-owned required external vocabulary for the lifetime of its caller\'s Cordis effect.',
+        description: 'Register one plugin-owned required external vocabulary for the lifetime of its caller\'s Cordis effect. One event type has one active writer registration; dispose an older version before registering its replacement.',
         parameters: [{ name: 'registration', description: 'namespace, schema version, event types, and payload validators.' }],
         returns: 'an idempotent disposer that removes the vocabulary.',
         throws: ['{TypeError} when the registration cannot identify one external vocabulary.', '{Error} when another active registration owns one of its event types.'],
@@ -1763,7 +1763,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'prepare(id?: SessionId, options?: PrepareSessionOptions): Session',
         description: 'Build a session WITHOUT entering it into the store — validate the id/cwd and construct the Session (with its immutable SessionHeader). Pairs with enter + announce: a caller that owns a composite `ctx.effect` (the agent factory) folds the session lifecycle into that ONE effect so a fiber unload tears the session + agent down as a single ORDERED chain rather than as racing sibling effects — which would remove the publication hooks before the driver\'s closing events commit, dropping them.',
-        parameters: [{ name: 'id', description: 'the session id; omitted, the store mints `session-<n>`.' }, { name: 'options', description: 'seed events and/or creation metadata for the header. With `seedSource: \'persistence\'`, metadata and events must be fresh detached graphs whose ownership transfers to this call: they are validated and frozen in place through {@link Session.fromRestore}, so the caller must retain no mutable aliases.' }],
+        parameters: [{ name: 'id', description: 'the session id; omitted, the store mints `session-<n>`.' }, { name: 'options', description: 'seed events and/or creation metadata for the header. With `seedSource: \'persistence\'`, metadata and events must be fresh detached graphs whose ownership transfers to this call: they are validated and frozen in place through the store-owned restoration path, and each `requiredExternal` record must match this store\'s active registration. The caller must retain no mutable aliases.' }],
         returns: 'the constructed session, NOT yet in the store.',
         throws: ['if a session with `id` already exists, metadata is not a plain lossless-JSON record with valid scalar fields, or `meta.cwd` is a non-absolute path.'],
       },

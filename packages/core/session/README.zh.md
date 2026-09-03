@@ -51,7 +51,7 @@ session.deriveMessages()         // the derived model history
 
 ### 写入必需外部事件
 
-事件会改变其重建状态的插件在 effect 中注册命名空间、schema 版本、事件类型与同步载荷校验器：`ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(registration))`。它通过 `ctx.sessions.appendRequiredExternalEvent(session, type, data)` 写入这些类型，后者会写入持久化的 `requiredExternal` 标识。冷持久化读取要求存在精确且活跃的注册，并重新校验载荷；缺少注册会拒绝日志，格式错误的标记或载荷属于损坏。返回 Promise 的校验器会被拒绝。`session.append()` 仍用于 Harness 自有事件和仅实时的扩展事件，不能写入此标记。
+事件会改变其重建状态的插件在 effect 中注册命名空间、schema 版本、事件类型与同步载荷校验器：`ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(registration))`。它通过 `ctx.sessions.appendRequiredExternalEvent(session, type, data)` 写入这些类型，后者会写入持久化的 `requiredExternal` 标识。冷持久化读取要求存在精确且活跃的注册，并重新校验载荷；缺少注册会拒绝日志，格式错误的标记或载荷属于损坏。返回 Promise 的校验器会被拒绝。必需记录只能通过 `ctx.sessions.prepare({ seedSource: 'persistence', ... })` 恢复；直接调用 `Session.create()` 与 `Session.fromRestore()` 会拒绝其标记。一个事件类型只能有一个活跃写入注册，因此注册替代版本前必须释放旧版本。`session.append()` 仍用于 Harness 自有事件和仅实时的扩展事件，不能写入此标记。
 
 ### 读取日志
 

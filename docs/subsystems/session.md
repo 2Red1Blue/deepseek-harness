@@ -203,7 +203,7 @@ type OptionalSessionSeq = SessionSeq | null
 
 ### Required external event readers
 
-An external plugin whose events affect reconstruction registers its exact namespace, schema version, event types, and synchronous validators through `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(...))`, then writes only through `ctx.sessions.appendRequiredExternalEvent(...)`. The durable envelope records the registration identity; cold storage reads require the matching active registration and validate its payload. A missing or disposed registration refuses the log, while a malformed marker, invalid payload, or asynchronous validator is corruption or a rejected write. JSONL caches the reader registration snapshot with the file revision, so an unload cannot reuse a formerly accepted log.
+An external plugin whose events affect reconstruction registers its exact namespace, schema version, event types, and synchronous validators through `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(...))`, then writes only through `ctx.sessions.appendRequiredExternalEvent(...)`. The durable envelope records the registration identity; cold storage reads require the matching active registration and validate its payload. A missing or disposed registration refuses the log, while a malformed marker, invalid payload, or asynchronous validator is corruption or a rejected write. Only `SessionStore.prepare({ seedSource: 'persistence' })` restores a required external record; direct `Session.create()` and `Session.fromRestore()` reject it. JSONL caches the reader registration snapshot with the file revision, so an unload cannot reuse a formerly accepted log.
 
 ```ts type-equiv
 /** Immutable reader identity stamped on one required external Session event. */
@@ -496,6 +496,8 @@ declare class Session {
    * Restore a detached session by taking ownership of fresh persistence values.
    * The storage format, event envelopes, sequence continuity, surface transitions,
    * and header fields are validated before the restored objects are frozen.
+   * This public constructor refuses `requiredExternal` records; SessionStore
+   * restores those only through its active reader-registration snapshot.
    * @param id - restored session identity.
    * @param seed - fresh detached events whose ownership is transferred.
    * @param header - fresh detached metadata whose ownership is transferred.
@@ -880,7 +882,8 @@ Persistence is intentionally not implemented here — the agent lifecycle attach
 ```ts cordis-catalog
 /**
  * Register one plugin-owned required external vocabulary for the lifetime of
- * its caller's Cordis effect.
+ * its caller's Cordis effect. One event type has one active writer
+ * registration; dispose an older version before registering its replacement.
  * @param registration - namespace, schema version, event types, and payload validators.
  * @returns an idempotent disposer that removes the vocabulary.
  * @throws {TypeError} when the registration cannot identify one external vocabulary.
@@ -941,8 +944,9 @@ create(id?: SessionId, options?: CreateSessionOptions): Session
  * @param options - seed events and/or creation metadata for the header. With
  *   `seedSource: 'persistence'`, metadata and events must be fresh detached
  *   graphs whose ownership transfers to this call: they are validated and
- *   frozen in place through {@link Session.fromRestore}, so the caller must
- *   retain no mutable aliases.
+ *   frozen in place through the store-owned restoration path, and each
+ *   `requiredExternal` record must match this store's active registration.
+ *   The caller must retain no mutable aliases.
  * @returns the constructed session, NOT yet in the store.
  * @throws if a session with `id` already exists, metadata is not a plain
  *   lossless-JSON record with valid scalar fields, or `meta.cwd` is a

@@ -479,6 +479,17 @@ describe('JsonlSessionPersistence: required external events', () => {
       (error: unknown) => error instanceof Error ? error.name : String(error),
     )
     expect(removedResult).toBe('SessionFormatUnsupportedError')
+
+    const reactivatedRegistration = reader.effect(
+      () => reader.sessions.registerRequiredExternalEvents(requiredExternalRegistration),
+      'test required external reader vocabulary reactivated',
+    )
+    const reaccepted = await readAll(reader.sessionPersistence, session.id)
+    expect(reaccepted.events).toMatchObject([{
+      type: 'roundtable-director/run',
+      requiredExternal: { namespace: 'roundtable-director', version: 1 },
+    }])
+    reactivatedRegistration()
     await reader.fiber.dispose()
   })
 })

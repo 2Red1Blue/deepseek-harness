@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FORMAT_VERSION, Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { RequiredExternalSessionEventRegistration, SessionEvent } from '@deepseek-ai/dsh-session'
 
 const registration: RequiredExternalSessionEventRegistration = {
@@ -144,5 +144,41 @@ describe('SessionStore required external events', () => {
       data: { turn: 1 },
       requiredExternal: { namespace: 'roundtable-director', version: 1 },
     } as unknown as SessionEvent])).toThrow('cannot mark Harness event "turn/start" as requiredExternal')
+  })
+
+  it('allows an external seed only through SessionStore persistence preparation with an active registration', async () => {
+    const id = SessionId('external-restored')
+    const externalSeed = (): SessionEvent[] => [{
+      type: 'roundtable-director/run',
+      seq: 0,
+      time: 1,
+      data: { runId: 'run-1' },
+      requiredExternal: { namespace: 'roundtable-director', version: 1 },
+    } as unknown as SessionEvent]
+    const header = () => ({ version: SESSION_FORMAT_VERSION, id, createdAt: 1, isSeeded: false })
+
+    expect(() => Session.create(id, externalSeed())).toThrow('requires an active SessionStore requiredExternal registration')
+    expect(() => Session.fromRestore(id, externalSeed(), header(), SessionLogOffset(0)))
+      .toThrow('requires an active SessionStore requiredExternal registration')
+
+    const ctx = await setup()
+    const dispose = ctx.sessions.registerRequiredExternalEvents(registration)
+    expect(() => ctx.sessions.prepare(id, {
+      seed: [{ ...externalSeed()[0]!, data: { runId: 'wrong' } }],
+      meta: header(),
+      inheritedEventCount: SessionLogOffset(0),
+      seedSource: 'persistence',
+    })).toThrow('run event requires runId "run-1"')
+    const restored = ctx.sessions.prepare(id, {
+      seed: externalSeed(),
+      meta: header(),
+      inheritedEventCount: SessionLogOffset(0),
+      seedSource: 'persistence',
+    })
+    expect(restored.snapshotEvents()[0]).toMatchObject({
+      type: 'roundtable-director/run',
+      requiredExternal: { namespace: 'roundtable-director', version: 1 },
+    })
+    dispose()
   })
 })

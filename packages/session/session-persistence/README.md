@@ -62,7 +62,7 @@ Persistence returns the physically valid log; semantic repair belongs to the rea
 
 ### Failures and recovery
 
-A stored log the current build cannot faithfully interpret is refused with a direction-aware error, never misread. `SESSION_FORMAT_VERSION` remains v0 and this build provides no format-migration path; a newer version instructs the operator to upgrade the harness. The decoder accepts only the bounded same-version record variants named below. An event type unknown to this build refuses unless its envelope marks it `ignorable` or the active Session store owns its exact `requiredExternal` registration and accepts its payload; a malformed marker or rejected payload is `SessionPersistenceCorruptionError`.
+A stored log the current build cannot faithfully interpret is refused with a direction-aware error, never misread. `SESSION_FORMAT_VERSION` remains v0 and this build provides no format-migration path; a newer version instructs the operator to upgrade the harness. The decoder accepts only the bounded same-version record variants named below. An event type unknown to this build refuses unless its envelope marks it `ignorable` or the active Session store owns its exact `requiredExternal` registration and accepts its payload; a malformed marker or rejected payload is `SessionPersistenceCorruptionError`. Mount the backend where `ctx.sessions` is visible: a persistence context without that store has no external-reader vocabulary and therefore refuses required external logs.
 
 -----
 
