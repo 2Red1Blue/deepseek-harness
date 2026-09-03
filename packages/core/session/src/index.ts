@@ -263,7 +263,7 @@ function assertSessionEventEnvelope(
     if (externalValidation === undefined) {
       throw new Error(`seed event at index ${index} requires an active SessionStore requiredExternal registration`)
     }
-    const result = externalValidation.validate(requiredExternal, type, event['data'])
+    const result = externalValidation.validate(requiredExternal, type, deepFreeze(event['data']))
     if (result.kind !== 'valid') {
       throw new Error(`seed event at index ${index} has no valid requiredExternal registration: ${result.reason}`)
     }
@@ -747,40 +747,39 @@ export class Session {
     surfaceOpts: SurfaceIntent | undefined,
     stamp?: RequiredExternalStamper,
   ): SessionEvent {
-    const surfaceMetadata = {
-      ...surfaceOpts?.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: surfaceOpts.sourceEventSeqs },
-      ...surfaceOpts?.surfaceOp === undefined ? {} : { surfaceOp: surfaceOpts.surfaceOp },
-    }
-    const dataSnapshot = snapshotJsonValue(data)
-    if (dataSnapshot === undefined) {
-      throw new Error(`session event "${type}" carries non-JSON-serializable data`)
-    }
-    assertSupportedRequestHeader(type, dataSnapshot, `session event "${type}"`)
-    // A required-external validator must validate the exact immutable payload
-    // that enters the durable log; it cannot mutate a detached candidate after
-    // accepting it and before the event commits.
-    const committedData = stamp === undefined ? dataSnapshot : deepFreeze(dataSnapshot)
-    const requiredExternal = stamp?.(committedData)
-    const surfaceMetadataSnapshot = snapshotJsonValue(surfaceMetadata)
-    if (surfaceMetadataSnapshot === undefined) {
-      throw new Error(`session event "${type}" carries non-JSON-serializable surface metadata`)
-    }
     const entry = attachments.get(this)
     if (entry?.appending) {
       throw new Error('session append cannot reenter while another append is being published')
     }
-    const event = deepFreeze({
-      type,
-      seq: SessionSeq(this.log.length),
-      time: Date.now(),
-      data: committedData,
-      ...requiredExternal === undefined ? {} : { requiredExternal },
-      ...(surfaceMetadataSnapshot as { surfaceOp?: unknown; sourceEventSeqs?: unknown }),
-    } as SessionEvent)
-    this.surfaceManager.validateNext(event)
-
     if (entry !== undefined) entry.appending = true
     try {
+      const surfaceMetadata = {
+        ...surfaceOpts?.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: surfaceOpts.sourceEventSeqs },
+        ...surfaceOpts?.surfaceOp === undefined ? {} : { surfaceOp: surfaceOpts.surfaceOp },
+      }
+      const dataSnapshot = snapshotJsonValue(data)
+      if (dataSnapshot === undefined) {
+        throw new Error(`session event "${type}" carries non-JSON-serializable data`)
+      }
+      assertSupportedRequestHeader(type, dataSnapshot, `session event "${type}"`)
+      // A required-external validator must validate the exact immutable payload
+      // that enters the durable log; it cannot mutate a detached candidate after
+      // accepting it and before the event commits.
+      const committedData = stamp === undefined ? dataSnapshot : deepFreeze(dataSnapshot)
+      const requiredExternal = stamp?.(committedData)
+      const surfaceMetadataSnapshot = snapshotJsonValue(surfaceMetadata)
+      if (surfaceMetadataSnapshot === undefined) {
+        throw new Error(`session event "${type}" carries non-JSON-serializable surface metadata`)
+      }
+      const event = deepFreeze({
+        type,
+        seq: SessionSeq(this.log.length),
+        time: Date.now(),
+        data: committedData,
+        ...requiredExternal === undefined ? {} : { requiredExternal },
+        ...(surfaceMetadataSnapshot as { surfaceOp?: unknown; sourceEventSeqs?: unknown }),
+      } as SessionEvent)
+      this.surfaceManager.validateNext(event)
       let callbacks: SessionCallback[] | undefined
       const callbackArgs: unknown[] = [this, event]
       if (entry !== undefined) {

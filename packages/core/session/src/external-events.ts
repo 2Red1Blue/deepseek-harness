@@ -71,7 +71,7 @@ export function requiredExternalSessionEventRef(value: unknown): RequiredExterna
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1) {
     throw new TypeError('required external Session event reference version must be a positive safe integer')
   }
-  return { namespace: record.namespace, version }
+  return Object.freeze({ namespace: record.namespace, version })
 }
 
 /**

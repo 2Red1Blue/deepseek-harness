@@ -11,7 +11,7 @@ import {
   requiredExternalSessionEventRef,
   SESSION_FORMAT_VERSION,
 } from '@deepseek-ai/dsh-session'
-import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
+import { deepFreeze, snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RequiredExternalSessionEventValidation, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import {
   SessionFormatUnsupportedError,
@@ -50,6 +50,36 @@ export function assertVersion(meta: SessionHeader, location?: SessionLocation): 
   }
 }
 
+/** Validate the fixed Session-event envelope shared by known and external storage records. */
+function assertStoredEventEnvelope(value: unknown, index: number): asserts value is SessionEvent {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`stored event at index ${index} has an invalid event envelope`)
+  }
+  const event = value as Record<string, unknown>
+  for (const key in event) {
+    switch (key) {
+      case 'type':
+      case 'seq':
+      case 'time':
+      case 'data':
+      case 'surfaceOp':
+      case 'sourceEventSeqs':
+      case 'ignorable':
+      case 'requiredExternal':
+        break
+      default:
+        throw new Error(`stored event at index ${index} has an invalid event envelope`)
+    }
+  }
+  if (typeof event['type'] !== 'string'
+    || typeof event['seq'] !== 'number' || !Number.isSafeInteger(event['seq']) || event['seq'] < 0 || Object.is(event['seq'], -0)
+    || typeof event['time'] !== 'number' || !Number.isSafeInteger(event['time'])
+    || event['data'] === undefined
+    || (event['ignorable'] !== undefined && event['ignorable'] !== true)) {
+    throw new Error(`stored event at index ${index} has an invalid event envelope`)
+  }
+}
+
 /**
  * Validate one exclusively owned stored event array in place: adopt each
  * record (validating and freezing it) and refuse any event type this build
@@ -73,7 +103,16 @@ export function validateStoredEvents(
   location?: SessionLocation,
   requiredExternal?: RequiredExternalSessionEventValidation,
 ): SessionEvent[] {
-  for (const event of events) {
+  for (const [index, event] of events.entries()) {
+    try {
+      assertStoredEventEnvelope(event, index)
+    } catch (error: unknown) {
+      if (error instanceof SessionFormatUnsupportedError) throw error
+      throw new SessionPersistenceCorruptionError(
+        `stored session "${meta.id}" has an invalid event envelope at index ${index}`,
+        { cause: error },
+      )
+    }
     let externalRef
     try {
       externalRef = requiredExternalSessionEventRef((event as Record<string, unknown>)['requiredExternal'])
@@ -96,7 +135,7 @@ export function validateStoredEvents(
           { cause: new Error('Harness event cannot use external marker') },
         )
       }
-      const result = requiredExternal?.validate(externalRef, event.type, event.data)
+      const result = requiredExternal?.validate(externalRef, event.type, deepFreeze(event.data))
       if (result === undefined || result.kind === 'unavailable') {
         throw unsupported(
           `session "${meta.id}" contains required external event "${event.type}" (seq ${event.seq}) for ${externalRef.namespace} v${String(externalRef.version)}, but this runtime has no matching registration; refusing to interpret the log`,
@@ -109,9 +148,7 @@ export function validateStoredEvents(
           { cause: new Error(result.reason) },
         )
       }
-      continue
-    }
-    if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true) {
+    } else if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true) {
       throw unsupported(
         `session "${meta.id}" contains event type "${event.type}" (seq ${event.seq}) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness`,
         location,

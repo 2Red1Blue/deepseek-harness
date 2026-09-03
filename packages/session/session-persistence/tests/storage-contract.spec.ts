@@ -180,6 +180,30 @@ describe('validateStoredEvents', () => {
       type: 'roundtable-director/run',
       requiredExternal: { namespace: 'roundtable-director', version: 1 },
     })
+    expect(Object.isFrozen(events[0]!.data)).toBe(true)
+  })
+
+  it('gives an external reader validator the immutable payload it accepts', () => {
+    let mutationRejected = false
+    const immutableValidation: RequiredExternalSessionEventValidation = {
+      generation: 2,
+      validate(ref, type, data) {
+        const result = externalValidation.validate(ref, type, data)
+        if (result.kind !== 'valid') return result
+        try {
+          const mutable = data as { runId: string }
+          mutable.runId = 'wrong'
+        } catch {
+          mutationRejected = true
+        }
+        return { kind: 'valid' }
+      },
+    }
+    const events = [externalEvent()]
+
+    expect(validateStoredEvents(meta('external-immutable'), events, undefined, immutableValidation)).toBe(events)
+    expect(events[0]!.data).toEqual({ runId: 'run-1' })
+    expect(mutationRejected).toBe(true)
   })
 
   it('refuses a required external event without an exact reader vocabulary', () => {
@@ -210,6 +234,10 @@ describe('validateStoredEvents', () => {
 
     const malformedIgnorable = [externalEvent({ ignorable: 1 })]
     expect(() => validateStoredEvents(meta('external-malformed-ignorable'), malformedIgnorable, undefined, externalValidation))
+      .toThrow(SessionPersistenceCorruptionError)
+
+    const extraEnvelope = [externalEvent({ unexpected: true })]
+    expect(() => validateStoredEvents(meta('external-extra-envelope'), extraEnvelope, undefined, externalValidation))
       .toThrow(SessionPersistenceCorruptionError)
 
     const firstParty = [externalEvent({ type: 'turn/start', data: { turn: 1 } })]

@@ -516,7 +516,7 @@ describe('JsonlSessionPersistence: required external events', () => {
     }), 'test required external reader vocabulary self-releasing')
     const releaseDuringValidation = selfReleasingRegistration
     await expect(readAll(reader.sessionPersistence, session.id))
-      .rejects.toThrow('required external reader registration changed while reading')
+      .rejects.toThrow('required external reader registration changed during validation')
 
     const reactivatedRegistration = reader.effect(
       () => reader.sessions.registerRequiredExternalEvents(requiredExternalRegistration),

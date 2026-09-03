@@ -120,6 +120,32 @@ describe('SessionStore required external events', () => {
     dispose()
   })
 
+  it('rejects a validator reentrant append before it can reorder the event log', async () => {
+    const ctx = await setup()
+    let reentrantRejected = false
+    const reentrant: RequiredExternalSessionEventRegistration = {
+      namespace: 'roundtable-reentrant',
+      version: 1,
+      events: [{
+        type: 'roundtable-reentrant/run',
+        validate(): void {
+          try {
+            ctx.sessions.appendRequiredExternalEvent(session, 'roundtable-reentrant/run', { runId: 'inner' })
+          } catch (error: unknown) {
+            reentrantRejected = error instanceof Error && error.message.includes('cannot reenter')
+          }
+        },
+      }],
+    }
+    const dispose = ctx.sessions.registerRequiredExternalEvents(reentrant)
+    const session = ctx.sessions.create(SessionId('external-reentrant-validator'))
+
+    const outer = ctx.sessions.appendRequiredExternalEvent(session, 'roundtable-reentrant/run', { runId: 'outer' })
+    expect(reentrantRejected).toBe(true)
+    expect(session.snapshotEvents()).toEqual([outer])
+    dispose()
+  })
+
   it('changes the reusable reader snapshot whenever a registration enters or leaves', async () => {
     const ctx = await setup()
     const absent = ctx.sessions.requiredExternalEventValidation()
@@ -257,5 +283,45 @@ describe('SessionStore required external events', () => {
       inheritedEventCount: SessionLogOffset(0),
       seedSource: 'persistence',
     })).toThrow('registration changed during restoration')
+  })
+
+  it('gives persistence restoration validators the immutable payload they accept', async () => {
+    const ctx = await setup()
+    let mutationRejected = false
+    const mutating: RequiredExternalSessionEventRegistration = {
+      namespace: 'roundtable-restore-immutable',
+      version: 1,
+      events: [{
+        type: 'roundtable-restore-immutable/run',
+        validate(data: unknown): void {
+          if (typeof data !== 'object' || data === null || (data as Record<string, unknown>)['runId'] !== 'run-1') {
+            throw new Error('restore event requires runId "run-1"')
+          }
+          try {
+            const mutable = data as { runId: string }
+            mutable.runId = 'wrong'
+          } catch {
+            mutationRejected = true
+          }
+        },
+      }],
+    }
+    const dispose = ctx.sessions.registerRequiredExternalEvents(mutating)
+    const id = SessionId('external-restored-immutable')
+    const restored = ctx.sessions.prepare(id, {
+      seed: [{
+        type: 'roundtable-restore-immutable/run',
+        seq: 0,
+        time: 1,
+        data: { runId: 'run-1' },
+        requiredExternal: { namespace: 'roundtable-restore-immutable', version: 1 },
+      } as unknown as SessionEvent],
+      meta: { version: SESSION_FORMAT_VERSION, id, createdAt: 1, isSeeded: false },
+      inheritedEventCount: SessionLogOffset(0),
+      seedSource: 'persistence',
+    })
+    expect(restored.snapshotEvents()[0]?.data).toEqual({ runId: 'run-1' })
+    expect(mutationRejected).toBe(true)
+    dispose()
   })
 })

@@ -445,7 +445,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     const finalValidation = this.ctx.get('sessions')?.requiredExternalEventValidation()
     if (parsed.events.some(event => event.requiredExternal !== undefined) && finalValidation !== readValidation) {
       throw new SessionFormatUnsupportedError(
-        `session "${parsed.meta.id}" required external reader registration changed while reading; retry the read`,
+        `session "${parsed.meta.id}" required external reader registration changed during validation; refusing the read`,
         location,
       )
     }
