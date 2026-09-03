@@ -41,6 +41,7 @@ describe('SessionStore required external events', () => {
     })
     expect(event.ignorable).toBeUndefined()
     expect(Object.isFrozen(event)).toBe(true)
+    expect(Object.isFrozen(event.data)).toBe(true)
     dispose()
   })
 
@@ -84,6 +85,55 @@ describe('SessionStore required external events', () => {
     expect(removed).not.toBe(active)
     expect(removed.validate({ namespace: 'roundtable-director', version: 1 }, 'roundtable-director/run', { runId: 'run-1' }))
       .toMatchObject({ kind: 'unavailable' })
+  })
+
+  it('requires an exact namespace, version, and type on cold-read validation', async () => {
+    const ctx = await setup()
+    const dispose = ctx.sessions.registerRequiredExternalEvents(registration)
+    const snapshot = ctx.sessions.requiredExternalEventValidation()
+
+    expect(snapshot.validate({ namespace: 'other-plugin', version: 1 }, 'roundtable-director/run', { runId: 'run-1' }))
+      .toMatchObject({ kind: 'unavailable' })
+    expect(snapshot.validate({ namespace: 'roundtable-director', version: 2 }, 'roundtable-director/run', { runId: 'run-1' }))
+      .toMatchObject({ kind: 'unavailable' })
+    expect(snapshot.validate({ namespace: 'roundtable-director', version: 1 }, 'roundtable-director/other', { runId: 'run-1' }))
+      .toMatchObject({ kind: 'unavailable' })
+    dispose()
+  })
+
+  it('rejects malformed, duplicate, and asynchronous registrations without retaining ownership', async () => {
+    const ctx = await setup()
+    const invalidNamespace = { ...registration, namespace: 1 } as unknown as RequiredExternalSessionEventRegistration
+    expect(() => ctx.sessions.registerRequiredExternalEvents(invalidNamespace))
+      .toThrow('namespace must be a string')
+
+    const first = ctx.sessions.registerRequiredExternalEvents(registration)
+    expect(() => ctx.sessions.registerRequiredExternalEvents(registration)).toThrow('already registered')
+    first()
+    first()
+    const replacement = ctx.sessions.registerRequiredExternalEvents(registration)
+    replacement()
+
+    const asynchronous: RequiredExternalSessionEventRegistration = {
+      namespace: 'roundtable-async',
+      version: 1,
+      events: [{
+        type: 'roundtable-async/run',
+        validate: async (): Promise<void> => {
+          throw new Error('asynchronous validator rejection')
+        },
+      }],
+    }
+    const asyncDispose = ctx.sessions.registerRequiredExternalEvents(asynchronous)
+    const session = ctx.sessions.create(SessionId('external-async-validator'))
+    expect(() => ctx.sessions.appendRequiredExternalEvent(session, 'roundtable-async/run', { runId: 'run-1' }))
+      .toThrow('must complete synchronously')
+    expect(ctx.sessions.requiredExternalEventValidation().validate(
+      { namespace: 'roundtable-async', version: 1 },
+      'roundtable-async/run',
+      { runId: 'run-1' },
+    )).toMatchObject({ kind: 'invalid', reason: expect.stringContaining('must complete synchronously') })
+    asyncDispose()
   })
 
   it('refuses a requiredExternal marker on a Harness event before a seeded session exists', () => {

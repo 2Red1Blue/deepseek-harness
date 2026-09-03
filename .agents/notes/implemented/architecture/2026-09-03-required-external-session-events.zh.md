@@ -12,7 +12,7 @@ Status: implemented
 
 `SessionEvent` 携带可选的 `requiredExternal` 标识，其中含有插件命名空间与正 schema 版本。该标记与 `ignorable` 互斥，Harness 自有事件类型不能携带它。
 
-`SessionStore.registerRequiredExternalEvents()` 接受一个由命名空间事件类型和载荷校验器组成的插件词汇，并返回幂等 disposer。插件通过 `ctx.effect()` 拥有该注册。`SessionStore.appendRequiredExternalEvent()` 通过活跃注册校验分离后的载荷，并在不可变事件提交前写入精确标识；普通 `Session.append()` 不能写入此标记。
+`SessionStore.registerRequiredExternalEvents()` 接受一个由命名空间事件类型和同步载荷校验器组成的插件词汇，并返回幂等 disposer。插件通过 `ctx.effect()` 拥有该注册。`SessionStore.appendRequiredExternalEvent()` 通过活跃注册校验分离后的载荷，并在不可变事件提交前写入精确标识；返回 Promise 的校验器会被拒绝，不会创建未观察的异步检查。普通 `Session.append()` 不能写入此标记。
 
 `validateStoredEvents()` 只在活动读取方快照包含精确命名空间、版本、类型，且校验器接受载荷时，才接纳必需外部记录。缺少注册会产生 `SessionFormatUnsupportedError`；格式错误的标记、Harness 类型上的标记、冲突的 `ignorable` 或被拒绝的载荷会产生 `SessionPersistenceCorruptionError`。JSONL 在冷日志 memo key 中包含不可变读取方快照标识，因此释放注册后不会复用先前被接受的缓存日志。
 

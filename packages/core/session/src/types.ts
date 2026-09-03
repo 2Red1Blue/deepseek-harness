@@ -432,7 +432,7 @@ export interface RequiredExternalSessionEventRef {
 export interface RequiredExternalSessionEventDefinition {
   /** Event type beginning with the registration namespace followed by `/`. */
   readonly type: string
-  /** Refuse data the owning plugin version cannot reconstruct. */
+  /** Synchronously refuse data the owning plugin version cannot reconstruct. */
   validate(data: unknown): void
 }
 

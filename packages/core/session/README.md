@@ -51,7 +51,7 @@ Surface events (`user/message`, `assistant/message`, `tool/result`) must declare
 
 ### Write required external events
 
-A plugin whose event changes its reconstructed state registers its namespace, schema version, event types, and payload validators in an effect: `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(registration))`. It writes those types through `ctx.sessions.appendRequiredExternalEvent(session, type, data)`, which stamps the durable `requiredExternal` identity. Cold persistence reads require the exact active registration and revalidate the payload; a missing registration refuses the log, and a malformed marker or payload is corruption. `session.append()` remains for Harness-owned and live-only extension events and cannot write this marker.
+A plugin whose event changes its reconstructed state registers its namespace, schema version, event types, and synchronous payload validators in an effect: `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(registration))`. It writes those types through `ctx.sessions.appendRequiredExternalEvent(session, type, data)`, which stamps the durable `requiredExternal` identity. Cold persistence reads require the exact active registration and revalidate the payload; a missing registration refuses the log, and a malformed marker or payload is corruption. A validator that returns a Promise is rejected. `session.append()` remains for Harness-owned and live-only extension events and cannot write this marker.
 
 ### Read the log
 

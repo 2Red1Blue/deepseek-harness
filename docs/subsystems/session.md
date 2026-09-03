@@ -203,7 +203,7 @@ type OptionalSessionSeq = SessionSeq | null
 
 ### Required external event readers
 
-An external plugin whose events affect reconstruction registers its exact namespace, schema version, event types, and validators through `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(...))`, then writes only through `ctx.sessions.appendRequiredExternalEvent(...)`. The durable envelope records the registration identity; cold storage reads require the matching active registration and validate its payload. A missing or disposed registration refuses the log, while a malformed marker or invalid payload is corruption. JSONL caches the reader registration snapshot with the file revision, so an unload cannot reuse a formerly accepted log.
+An external plugin whose events affect reconstruction registers its exact namespace, schema version, event types, and synchronous validators through `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(...))`, then writes only through `ctx.sessions.appendRequiredExternalEvent(...)`. The durable envelope records the registration identity; cold storage reads require the matching active registration and validate its payload. A missing or disposed registration refuses the log, while a malformed marker, invalid payload, or asynchronous validator is corruption or a rejected write. JSONL caches the reader registration snapshot with the file revision, so an unload cannot reuse a formerly accepted log.
 
 ```ts type-equiv
 /** Immutable reader identity stamped on one required external Session event. */
@@ -220,7 +220,7 @@ interface RequiredExternalSessionEventRef {
 interface RequiredExternalSessionEventDefinition {
   /** Event type beginning with the registration namespace followed by `/`. */
   readonly type: string
-  /** Refuse data the owning plugin version cannot reconstruct. */
+  /** Synchronously refuse data the owning plugin version cannot reconstruct. */
   validate(data: unknown): void
 }
 ```

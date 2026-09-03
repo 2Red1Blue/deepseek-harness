@@ -25,9 +25,27 @@ function keyOf(ref: RequiredExternalSessionEventRef, type: string): string {
 
 /** Reject an invalid registration namespace before it affects a durable log. */
 function assertNamespace(namespace: string): void {
+  if (typeof namespace !== 'string') {
+    throw new TypeError('required external Session event namespace must be a string')
+  }
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(namespace)) {
     throw new TypeError(`required external Session event namespace "${namespace}" is invalid`)
   }
+}
+
+/** Whether a validator returned an asynchronous result instead of completing its check. */
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return value !== null
+    && (typeof value === 'object' || typeof value === 'function')
+    && typeof (value as { then?: unknown }).then === 'function'
+}
+
+/** Run one payload validator synchronously and contain an accidental rejected promise. */
+function validatePayload(definition: RegisteredEventDefinition, data: unknown): void {
+  const result: unknown = definition.validate(data)
+  if (!isThenable(result)) return
+  void Promise.resolve(result).then(undefined, () => undefined)
+  throw new TypeError(`required external Session event "${definition.type}" validator must complete synchronously`)
 }
 
 /**
@@ -133,7 +151,7 @@ export class RequiredExternalSessionEventRegistry {
     if (definition === undefined) {
       throw new Error(`required external Session event "${type}" is not registered`)
     }
-    definition.validate(data)
+    validatePayload(definition, data)
     return definition.ref
   }
 
@@ -166,7 +184,7 @@ export class RequiredExternalSessionEventRegistry {
           }
         }
         try {
-          definition.validate(data)
+          validatePayload(definition, data)
           return { kind: 'valid' }
         } catch (error: unknown) {
           return {
