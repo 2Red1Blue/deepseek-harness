@@ -236,5 +236,26 @@ describe('SessionStore required external events', () => {
       inheritedEventCount: SessionLogOffset(0),
       seedSource: 'persistence',
     })).toThrow('no valid requiredExternal registration')
+
+    const selfReleasing: RequiredExternalSessionEventRegistration = {
+      namespace: 'roundtable-director',
+      version: 1,
+      events: [{
+        type: 'roundtable-director/run',
+        validate(data: unknown): void {
+          if (typeof data !== 'object' || data === null || (data as Record<string, unknown>)['runId'] !== 'run-1') {
+            throw new Error('run event requires runId "run-1"')
+          }
+          releaseDuringRestore()
+        },
+      }],
+    }
+    const releaseDuringRestore = ctx.sessions.registerRequiredExternalEvents(selfReleasing)
+    expect(() => ctx.sessions.prepare(SessionId('external-restored-self-releasing'), {
+      seed: externalSeed(),
+      meta: { ...header(), id: SessionId('external-restored-self-releasing') },
+      inheritedEventCount: SessionLogOffset(0),
+      seedSource: 'persistence',
+    })).toThrow('registration changed during restoration')
   })
 })

@@ -1083,13 +1083,18 @@ export class SessionStore extends Service {
     }
     if (this.store.has(sessionId)) throw new Error(`session "${sessionId}" already exists`)
     if (options?.seedSource === 'persistence') {
-      return restoreRegisteredExternalSession(
+      const externalValidation = this.requiredExternalEvents.snapshot()
+      const restored = restoreRegisteredExternalSession(
         sessionId,
         options.seed,
         options.meta,
         options.inheritedEventCount,
-        this.requiredExternalEvents.snapshot(),
+        externalValidation,
       )
+      if (this.requiredExternalEvents.snapshot() !== externalValidation) {
+        throw new Error('required external Session event registration changed during restoration')
+      }
+      return restored
     }
     const seed = options?.seed
     const meta = options?.meta
