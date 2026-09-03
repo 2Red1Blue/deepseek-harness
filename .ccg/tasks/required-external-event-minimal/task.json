@@ -6,7 +6,7 @@
   "risk": "high",
   "domain": "session-persistence",
   "currentPhase": "review",
-  "nextAction": "提交第二轮审查修复并运行最终窄范围双模型审查",
+  "nextAction": "将已审查的核心机制接入 Roundtable 插件，并以冷加载探针验证真实插件路径",
   "createdAt": "2026-09-03T00:00:00+08:00",
   "branch": "codex/required-external-event-minimal"
 }

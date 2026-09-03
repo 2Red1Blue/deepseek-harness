@@ -18,6 +18,8 @@ Status: implemented
 
 `SESSION_FORMAT_VERSION` 保持 `0`，因为 Harness 仍处于预发布阶段，不为旧的本地实验日志承诺兼容性。[可忽略外部事件决策](2026-08-30-retain-ignorable-external-session-events.zh.md)仍适用于可安全省略的信息性记录。
 
+`ignorable` 只适用于未知事件类型。新增事件信封字段属于结构性格式变更，即使事件类型可忽略也仍会 fail-closed。
+
 ## 曾考虑的替代方案
 
 **把 Roundtable 状态事件标为 `ignorable`。** 不予采用，因为每个 Roundtable 事件都可能改变后续重建；跳过其中一个会组装出错误状态。

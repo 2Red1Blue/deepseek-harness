@@ -146,6 +146,30 @@ describe('SessionStore required external events', () => {
     dispose()
   })
 
+  it('clears the append guard after a validator rejects', async () => {
+    const ctx = await setup()
+    const rejecting: RequiredExternalSessionEventRegistration = {
+      namespace: 'roundtable-recovering',
+      version: 1,
+      events: [{
+        type: 'roundtable-recovering/run',
+        validate(data: unknown): void {
+          if (typeof data !== 'object' || data === null || (data as Record<string, unknown>)['runId'] !== 'good') {
+            throw new Error('run event requires runId "good"')
+          }
+        },
+      }],
+    }
+    const dispose = ctx.sessions.registerRequiredExternalEvents(rejecting)
+    const session = ctx.sessions.create(SessionId('external-validator-recovery'))
+
+    expect(() => ctx.sessions.appendRequiredExternalEvent(session, 'roundtable-recovering/run', { runId: 'bad' }))
+      .toThrow('run event requires runId "good"')
+    const accepted = ctx.sessions.appendRequiredExternalEvent(session, 'roundtable-recovering/run', { runId: 'good' })
+    expect(session.snapshotEvents()).toEqual([accepted])
+    dispose()
+  })
+
   it('changes the reusable reader snapshot whenever a registration enters or leaves', async () => {
     const ctx = await setup()
     const absent = ctx.sessions.requiredExternalEventValidation()
@@ -321,6 +345,7 @@ describe('SessionStore required external events', () => {
       seedSource: 'persistence',
     })
     expect(restored.snapshotEvents()[0]?.data).toEqual({ runId: 'run-1' })
+    expect(Object.isFrozen(restored.snapshotEvents()[0]!.data)).toBe(true)
     expect(mutationRejected).toBe(true)
     dispose()
   })

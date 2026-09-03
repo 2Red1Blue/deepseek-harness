@@ -44,4 +44,36 @@ The guarded dual review `78670824-71db-4d9f-a605-99a8fa5f962c` compared `9573fd4
 | Seed marker parse errors lost their cause. | Fixed: the seed error retains its underlying marker-validation cause. |
 | The vocabulary could be mistaken for an access-control capability. | Documented: it is a durable vocabulary guard; code holding `ctx.sessions` can write an active registered type. |
 
-The final scoped dual review is required after this second correction set is committed.
+## Third independent review
+
+The guarded dual review `42089958-a924-4430-b1d9-725802b7935a` found one restoration race and two persistence hardening gaps. The fixes are in `7e386ec4ea` and `0d3a8dd6bd`.
+
+| Finding | Disposition |
+| --- | --- |
+| A reader registration could change after its validator returned but before store-owned restoration completed. | Fixed: `SessionStore.prepare()` confirms the captured reader snapshot after restoration before exposing the session. |
+| A read or seed validator could mutate an externally supplied payload. | Fixed: storage and restoration paths freeze the detached payload before validation. |
+| Required-external classification did not enforce the fixed stored-event envelope before type handling. | Fixed: storage validates the fixed envelope for every record before known, ignorable, or required-external classification. |
+| A validator-triggered nested append could bypass ordering expectations. | Fixed: the active session entry holds an append guard through cloning, validation, ownership confirmation, and commit. |
+
+## Final scoped dual review
+
+The guarded delta review `99b25a5d-8881-48c0-99e9-181dff52103e` compared `0d3a8dd6bd` with `e045261b18`. Codex approved without findings and Claude approved with observations only.
+
+| Observation | Disposition |
+| --- | --- |
+| The append guard might be absent for a live session without session attachments. | Refuted: `SessionStore.enter()` always attaches a live session, and `appendRequiredExternalEvent()` requires that exact live entry before writing. |
+| An ignorable record with an unknown envelope field no longer loads. | Deliberate: `ignorable` applies only to an unknown event type. Envelope fields define the session format and remain fail-closed; the session subsystem guide and Agent Note now state this explicitly. |
+| Guard recovery, restored payload immutability, and generic fixed-envelope failures needed more direct evidence. | Added focused cases for validator rejection recovery, frozen restored payloads, and malformed known/ignorable event envelopes. |
+
+No production implementation changed after this approving review; the remaining changes are the focused coverage and documentation clarification above.
+
+## Final focused evidence
+
+- `pnpm exec tsc -b packages/core/session/tsconfig.json packages/session/session-persistence/tsconfig.json packages/session/session-persistence-jsonl/tsconfig.json --pretty false` — passed.
+- `pnpm exec vitest run packages/core/session/tests/required-external.spec.ts packages/session/session-persistence/tests/storage-contract.spec.ts packages/session/session-persistence-jsonl/tests/jsonl.spec.ts -t 'required external|validateStoredEvents'` — 3 files, 26 passed, 147 skipped.
+- `pnpm run verify-translation-pairing --write docs/subsystems/session.md packages/core/session/README.md .agents/notes/implemented/architecture/2026-09-03-required-external-session-events.md` — no records changed.
+- `pnpm run verify-translation-pairing docs/subsystems/session.md packages/core/session/README.md .agents/notes/implemented/architecture/2026-09-03-required-external-session-events.md` — 3 named pairs consistent.
+- `pnpm run verify-agent-note-format` — 686 Agent Notes conform.
+- `git diff --check` — passed.
+
+Repository-wide test, type, and documentation gates remain intentionally deferred to merge or release. The next implementation step is Roundtable integration and a real cold-load probe, not another core-only test pass.

@@ -18,6 +18,8 @@ An external plugin can append a durable event that changes the plugin's reconstr
 
 `SESSION_FORMAT_VERSION` remains `0` because the Harness is pre-release and makes no compatibility promise for old local experimental logs. The [ignorable external events decision](2026-08-30-retain-ignorable-external-session-events.md) remains in force for informational records whose omission is safe.
 
+`ignorable` applies only to an unknown event type. A new event-envelope field is a structural format change and remains fail-closed even when its event type is ignorable.
+
 ## Alternatives considered
 
 **Mark Roundtable state events `ignorable`.** Rejected because every Roundtable event can change later reconstruction; a reader that skips one would assemble false state.

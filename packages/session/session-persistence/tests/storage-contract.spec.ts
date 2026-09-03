@@ -245,6 +245,19 @@ describe('validateStoredEvents', () => {
       .toThrow(SessionPersistenceCorruptionError)
   })
 
+  it('classifies malformed fixed envelopes as corruption before type handling', () => {
+    const malformed: SessionEvent[][] = [
+      [{ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 }, unexpected: true } as unknown as SessionEvent],
+      [{ type: 'foreign/telemetry', seq: 0, time: 1, data: {}, ignorable: false } as unknown as SessionEvent],
+      [{ type: 'turn/start', seq: 0, time: 1.5, data: { turn: 1 } } as unknown as SessionEvent],
+      [[] as unknown as SessionEvent],
+    ]
+    for (const [index, events] of malformed.entries()) {
+      expect(() => validateStoredEvents(meta(`invalid-envelope-${index}`), events))
+        .toThrow(SessionPersistenceCorruptionError)
+    }
+  })
+
   it('refuses the retired request/header "fallback" reason while accepting current headers', () => {
     const m = meta('retired-reason')
     const retired = [
