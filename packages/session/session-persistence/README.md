@@ -62,7 +62,7 @@ Persistence returns the physically valid log; semantic repair belongs to the rea
 
 ### Failures and recovery
 
-A stored log the current build cannot faithfully interpret is refused with a direction-aware error, never misread. `SESSION_FORMAT_VERSION` remains v0 and this build provides no format-migration path; a newer version instructs the operator to upgrade the harness. The decoder accepts only the bounded same-version record variants named below. An event type unknown to this build refuses unless its envelope marks it `ignorable`, and committed-prefix corruption rejects as `SessionPersistenceCorruptionError`.
+A stored log the current build cannot faithfully interpret is refused with a direction-aware error, never misread. `SESSION_FORMAT_VERSION` remains v0 and this build provides no format-migration path; a newer version instructs the operator to upgrade the harness. The decoder accepts only the bounded same-version record variants named below. An event type unknown to this build refuses unless its envelope marks it `ignorable` or the active Session store owns its exact `requiredExternal` registration and accepts its payload; a malformed marker or rejected payload is `SessionPersistenceCorruptionError`.
 
 -----
 
@@ -84,7 +84,7 @@ The package is a seam, not a backend framework: it exports the abstract `Session
 - **A torn physical tail never reaches a reader.** It belongs to an append that never resolved; the write path truncates it durably before its first new append.
 - **Lossless JSON data.** Batches and headers pass the shared one-pass validate-and-snapshot boundary (`materializeAppendBatch`/`materializeCreateHeader`); non-serializable payloads reject at the call site.
 - **Durability.** `append` persists best-effort; `flush` — per handle or service-wide — is the barrier that promises storage and also materializes an empty session.
-- **Fail-closed reads.** `validateStoredEvents` refuses unknown event vocabulary and retired pre-release shapes; `assertVersion` refuses foreign format versions.
+- **Fail-closed reads.** `validateStoredEvents` refuses unknown event vocabulary unless `ignorable` or an exact active `requiredExternal` registration permits it, and refuses retired pre-release shapes; `assertVersion` refuses foreign format versions.
 - **Single writer per backend instance.** The provider's in-process claim is taken at `create`/`open('write')` and released at handle close.
 
 ### Source map
@@ -104,7 +104,7 @@ Each `session/event` for the writer's session copies into that handle's internal
 
 ### Stored-record validation
 
-Backend reads validate current v0 records only and never rewrite them; appends write current v0 ([rationale](../../../.agents/notes/implemented/architecture/2026-08-30-retain-ignorable-external-session-events.md)). Every backend runs the same `storage-contract` helpers on every read path — handle reads and write-open priming — refusing an unknown event type as `SessionFormatUnsupportedError` and a retired payload variant of a current type as `SessionPersistenceCorruptionError`, with the raw-log `SessionLocation` attached when the backend keeps one artifact per session.
+Backend reads validate current v0 records only and never rewrite them; appends write current v0 ([rationale](../../../.agents/notes/implemented/architecture/2026-08-30-retain-ignorable-external-session-events.md)). Every backend runs the same `storage-contract` helpers on every read path — handle reads and write-open priming — accepting an external required event only through its matching active registration, refusing a missing registration as `SessionFormatUnsupportedError`, and refusing a malformed marker, rejected external payload, or retired payload variant of a current type as `SessionPersistenceCorruptionError`, with the raw-log `SessionLocation` attached when the backend keeps one artifact per session.
 
 </details>
 -----

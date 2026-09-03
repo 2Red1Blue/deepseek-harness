@@ -62,7 +62,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 
 ### 失败与恢复
 
-当前构建无法忠实解读的存储日志会以方向感知的错误被拒绝，绝不错读。`SESSION_FORMAT_VERSION` 保持 v0，本构建不提供格式迁移路径；更高版本会要求操作者升级 harness。解码器只接受下文点名的有限同版本记录变体。本构建不认识的事件类型会被拒绝，除非其信封标记为 `ignorable`；已提交前缀中的损坏以 `SessionPersistenceCorruptionError` 拒绝。
+当前构建无法忠实解读的存储日志会以方向感知的错误被拒绝，绝不错读。`SESSION_FORMAT_VERSION` 保持 v0，本构建不提供格式迁移路径；更高版本会要求操作者升级 harness。解码器只接受下文点名的有限同版本记录变体。本构建不认识的事件类型会被拒绝，除非其信封标记为 `ignorable`，或活动 Session store 拥有精确的 `requiredExternal` 注册并接受其载荷；格式错误的标记或被拒绝的载荷以 `SessionPersistenceCorruptionError` 处理。
 
 -----
 
@@ -84,7 +84,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 - **撕裂的物理尾部绝不到达读取方。** 它属于一次从未完成的 append；写路径在第一次新 append 之前将其持久截断。
 - **无损 JSON 数据。** 批次与 header 经过共享的单遍校验并快照边界（`materializeAppendBatch`/`materializeCreateHeader`）；无法序列化的载荷在调用处被拒绝。
 - **持久性。** `append` 尽力而为地持久化；`flush`——逐句柄或服务级——是承诺存储并同时把空会话实体化的屏障。
-- **失败即关闭的读取。** `validateStoredEvents` 拒绝未知事件词汇与已废弃的预发布形态；`assertVersion` 拒绝外来格式版本。
+- **失败即关闭的读取。** `validateStoredEvents` 拒绝未知事件词汇，除非 `ignorable` 或精确且活跃的 `requiredExternal` 注册允许它，并拒绝已废弃的预发布形态；`assertVersion` 拒绝外来格式版本。
 - **每个后端实例单写者。** provider 的进程内认领在 `create`/`open('write')` 时取得，在句柄关闭时释放。
 
 ### 源码地图
@@ -104,7 +104,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 
 ### 存储记录校验
 
-后端读取只校验当前 v0 记录且绝不重写它们；追加写入当前 v0（[理由](../../../.agents/notes/implemented/architecture/2026-08-30-retain-ignorable-external-session-events.zh.md)）。每个后端在每条读取路径——句柄读取与写打开预热——上运行同一套 `storage-contract` 辅助函数，把未知事件类型作为 `SessionFormatUnsupportedError` 拒绝，把当前类型的已废弃载荷变体作为 `SessionPersistenceCorruptionError` 拒绝，并在后端为每个会话保留一份产物时附上原始日志的 `SessionLocation`。
+后端读取只校验当前 v0 记录且绝不重写它们；追加写入当前 v0（[理由](../../../.agents/notes/implemented/architecture/2026-08-30-retain-ignorable-external-session-events.zh.md)）。每个后端在每条读取路径——句柄读取与写打开预热——上运行同一套 `storage-contract` 辅助函数，只通过匹配且活跃的注册接受必需外部事件，把缺失注册作为 `SessionFormatUnsupportedError` 拒绝，把格式错误的标记、被拒绝的外部载荷或当前类型的已废弃载荷变体作为 `SessionPersistenceCorruptionError` 拒绝，并在后端为每个会话保留一份产物时附上原始日志的 `SessionLocation`。
 
 </details>
 -----

@@ -76,6 +76,13 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
      * inconvenience) rather than silently resuming a gutted session.
      */
     ignorable?: true
+    /**
+     * Identifies the exact external plugin vocabulary needed to reconstruct
+     * this event. The value is written only through a registered
+     * {@link SessionStore} registration. A reader without an exact registration must
+     * refuse the log; it must never treat this required record as ignorable.
+     */
+    requiredExternal?: RequiredExternalSessionEventRef
   } & (K extends SurfaceEventType ? {
     /**
      * Seq numbers of earlier events that this event cites as sources
@@ -92,7 +99,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }[T]
 ```
 
-来源：[`packages/core/session/src/types.ts:368`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:375`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:404`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:436`](../packages/core/session/src/types.ts)
+来源：[`packages/core/session/src/types.ts:368`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:375`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:404`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:476`](../packages/core/session/src/types.ts)
 
 ## 事件
 

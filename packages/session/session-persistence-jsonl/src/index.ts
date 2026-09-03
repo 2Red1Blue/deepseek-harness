@@ -27,7 +27,7 @@ import {
 } from '@deepseek-ai/dsh-session-persistence'
 import { JsonlBackendTracker, JsonlSessionHandle } from './storage.ts'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionId, SessionHeader, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
+import type { RequiredExternalSessionEventValidation, SessionEvent, SessionId, SessionHeader, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
 import {
   encodeSegment, eventLines, logPath, logSuffix, parseHeader, parseHeaderMeta, projectDir, scanLog, sessionDir,
   SessionLogScanner, toHeaderLine,
@@ -102,6 +102,8 @@ interface StoredLog {
   /** Exact fork-inherited prefix length stored in the header line. */
   readonly inheritedEventCount: SessionLogOffsetType
   readonly revision: PersistenceRevision
+  /** Reader vocabulary identity used to validate this memoized cold read. */
+  readonly requiredExternalValidation: RequiredExternalSessionEventValidation | undefined
 }
 
 interface FileRevisionIdentity {
@@ -377,6 +379,8 @@ class JsonlSessionPersistence extends SessionPersistence {
 
   /**
    * Read, parse, and validate one stored log as the current logical prefix.
+   * The cache also keys the active external reader vocabulary so unloading a
+   * plugin cannot reuse a formerly accepted external event log.
    * @param path - the artifact file to read.
    * @param expectedId - the session identity the artifact must carry.
    * @param signal - optional cancellation for the stat/read/decode work.
@@ -384,9 +388,12 @@ class JsonlSessionPersistence extends SessionPersistence {
    */
   async readStoredLog(path: string, expectedId: SessionId, signal?: AbortSignal): Promise<StoredLog> {
     signal?.throwIfAborted()
+    const requiredExternalValidation = this.ctx.get('sessions')?.requiredExternalEventValidation()
     const probe = fileRevision(await stat(path, { bigint: true }))
     const memoized = this.coldLogMemo.get(expectedId)
-    if (memoized !== undefined && memoized.revision === probe) {
+    if (memoized !== undefined
+      && memoized.revision === probe
+      && memoized.requiredExternalValidation === requiredExternalValidation) {
       this.coldLogMemo.delete(expectedId)
       this.coldLogMemo.set(expectedId, memoized)
       return memoized
@@ -433,8 +440,8 @@ class JsonlSessionPersistence extends SessionPersistence {
     assertStoredId(expectedId, parsed.meta)
     const location = this.locate(parsed.meta)
     assertVersion(parsed.meta, location)
-    validateStoredEvents(parsed.meta, parsed.events, location)
-    const stored: StoredLog = { ...parsed, revision }
+    validateStoredEvents(parsed.meta, parsed.events, location, requiredExternalValidation)
+    const stored: StoredLog = { ...parsed, revision, requiredExternalValidation }
     this.coldLogMemo.delete(expectedId)
     this.coldLogMemo.set(expectedId, stored)
     for (const oldest of this.coldLogMemo.keys()) {

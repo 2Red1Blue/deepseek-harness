@@ -15,10 +15,12 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Message } from '@deepseek-ai/dsh-llm'
 import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq } from './types.ts'
 import type { TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
-import type { CreateSessionOptions, EpochHeader, PrepareSessionOptions, RequestContext, SessionEvent, SessionEventMap, SessionEventType, SessionHeader, SessionId, SurfaceIntent, SurfaceEventType } from './types.ts'
+import type { CreateSessionOptions, EpochHeader, PrepareSessionOptions, RequestContext, RequiredExternalSessionEventRef, RequiredExternalSessionEventRegistration, RequiredExternalSessionEventValidation, SessionEvent, SessionEventMap, SessionEventType, SessionHeader, SessionId, SurfaceIntent, SurfaceEventType } from './types.ts'
 import { deriveEventMessage, SurfaceManager } from './surface.ts'
 import type { SessionSurface } from './surface.ts'
 import { foldRequestHeader } from './request-header.ts'
+import { RequiredExternalSessionEventRegistry, requiredExternalSessionEventRef } from './external-events.ts'
+import { KNOWN_SESSION_EVENT_TYPES } from './known-event-types.ts'
 
 export * from './types.ts'
 export { SessionPreparation } from './preparation.ts'
@@ -31,6 +33,7 @@ export type { SessionSurface, SurfaceFoldReplacement, SurfaceFoldResult } from '
 export { deriveEventMessage, foldSurface, isAppendSurfaceEvent, isReplacementSurfaceEvent, isSurfaceEvent, isSurfaceEligibleType } from './surface.ts'
 export { canonicalHeader, foldRequestHeader, headerEquals } from './request-header.ts'
 export { KNOWN_SESSION_EVENT_TYPES } from './known-event-types.ts'
+export { requiredExternalSessionEventRef } from './external-events.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -224,6 +227,7 @@ function assertSessionEventEnvelope(value: Record<string, unknown>, index: numbe
       case 'surfaceOp':
       case 'sourceEventSeqs':
       case 'ignorable':
+      case 'requiredExternal':
         break
       default:
         throw new Error(`seed event at index ${index} has an invalid event envelope`)
@@ -238,6 +242,18 @@ function assertSessionEventEnvelope(value: Record<string, unknown>, index: numbe
     || event['data'] === undefined
     || (event['ignorable'] !== undefined && event['ignorable'] !== true)) {
     throw new Error(`seed event at index ${index} has an invalid event envelope`)
+  }
+  let requiredExternal: ReturnType<typeof requiredExternalSessionEventRef>
+  try {
+    requiredExternal = requiredExternalSessionEventRef(event['requiredExternal'])
+  } catch {
+    throw new Error(`seed event at index ${index} has an invalid requiredExternal marker`)
+  }
+  if (requiredExternal !== undefined && event['ignorable'] === true) {
+    throw new Error(`seed event at index ${index} cannot be both ignorable and requiredExternal`)
+  }
+  if (requiredExternal !== undefined && KNOWN_SESSION_EVENT_TYPES.has(type)) {
+    throw new Error(`seed event at index ${index} cannot mark Harness event "${type}" as requiredExternal`)
   }
   switch (type) {
     case 'request/header':
@@ -414,6 +430,15 @@ interface SessionEntry {
 /** Store attachment for the append path; module-private to keep Session store-agnostic publicly. */
 const attachments = new WeakMap<Session, SessionEntry>()
 
+/** Stamp a detached JSON payload after its registry-owned validator accepts it. */
+type RequiredExternalStamper = (data: unknown) => RequiredExternalSessionEventRef
+
+/** Module-private append function retained for each Session instance. */
+type RequiredExternalAppender = (type: string, data: unknown, stamp: RequiredExternalStamper) => SessionEvent
+
+/** Module-private required-external append functions; SessionStore remains the only caller. */
+const requiredExternalAppenders = new WeakMap<Session, RequiredExternalAppender>()
+
 /**
  * An event-sourced session: an append-only log of {@link SessionEvent}s.
  *
@@ -575,6 +600,7 @@ export class Session {
     if (seed !== undefined && this.log.at(-1)?.type !== 'session/end-seed') {
       this.append('session/end-seed', {})
     }
+    requiredExternalAppenders.set(this, (type, data, stamp) => this.appendInternal(type, data, undefined, stamp))
   }
 
   /** Cached immutable full snapshot of the private append-only log. */
@@ -670,7 +696,16 @@ export class Session {
     data: SessionEventMap[T],
     ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent] : []
   ): SessionEvent<T> {
-    const surfaceOpts: SurfaceIntent | undefined = opts[0]
+    return this.appendInternal(type, data, opts[0]) as SessionEvent<T>
+  }
+
+  /** Execute the shared snapshot, validation, freeze, and publication append path. */
+  private appendInternal(
+    type: string,
+    data: unknown,
+    surfaceOpts: SurfaceIntent | undefined,
+    stamp?: RequiredExternalStamper,
+  ): SessionEvent {
     const surfaceMetadata = {
       ...surfaceOpts?.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: surfaceOpts.sourceEventSeqs },
       ...surfaceOpts?.surfaceOp === undefined ? {} : { surfaceOp: surfaceOpts.surfaceOp },
@@ -680,6 +715,7 @@ export class Session {
       throw new Error(`session event "${type}" carries non-JSON-serializable data`)
     }
     assertSupportedRequestHeader(type, dataSnapshot, `session event "${type}"`)
+    const requiredExternal = stamp?.(dataSnapshot)
     const surfaceMetadataSnapshot = snapshotJsonValue(surfaceMetadata)
     if (surfaceMetadataSnapshot === undefined) {
       throw new Error(`session event "${type}" carries non-JSON-serializable surface metadata`)
@@ -693,9 +729,10 @@ export class Session {
       seq: SessionSeq(this.log.length),
       time: Date.now(),
       data: dataSnapshot,
+      ...requiredExternal === undefined ? {} : { requiredExternal },
       ...(surfaceMetadataSnapshot as { surfaceOp?: unknown; sourceEventSeqs?: unknown }),
-    } as unknown as SessionEvent<T>)
-    this.surfaceManager.validateNext(event as SessionEvent)
+    } as SessionEvent)
+    this.surfaceManager.validateNext(event)
 
     if (entry !== undefined) entry.appending = true
     try {
@@ -821,6 +858,18 @@ export class Session {
   }
 }
 
+/** Append one registered external event through the module-private SessionStore capability. */
+function appendRegisteredExternalEvent(
+  session: Session,
+  type: string,
+  data: unknown,
+  stamp: RequiredExternalStamper,
+): SessionEvent {
+  const append = requiredExternalAppenders.get(session)
+  if (append === undefined) throw new Error('required external event session is not appendable')
+  return append(type, data, stamp)
+}
+
 /** A fork source: either the live session object or its live store id. */
 export type SessionForkSource = Session | SessionId
 
@@ -857,6 +906,7 @@ export class SessionForkError extends Error {
 export class SessionStore extends Service {
   private store = new Map<SessionId, SessionEntry>()
   private counter = 0
+  private readonly requiredExternalEvents = new RequiredExternalSessionEventRegistry()
 
   constructor(ctx: Context) {
     super(ctx, 'sessions')
@@ -869,6 +919,40 @@ export class SessionStore extends Service {
         resolve: sessionId => this.get(sessionId),
       })
     })
+  }
+
+  /**
+   * Register one plugin-owned required external vocabulary for the lifetime of
+   * its caller's Cordis effect.
+   * @param registration - namespace, schema version, event types, and payload validators.
+   * @returns an idempotent disposer that removes the vocabulary.
+   * @throws {TypeError} when the registration cannot identify one external vocabulary.
+   * @throws {Error} when another active registration owns one of its event types.
+   */
+  registerRequiredExternalEvents(registration: RequiredExternalSessionEventRegistration): () => void {
+    return this.requiredExternalEvents.register(registration)
+  }
+
+  /**
+   * Append one required external event to a live session using its current
+   * plugin registration; ordinary {@link Session.append} cannot add this marker.
+   * @param session - live session owned by this store.
+   * @param type - one exact type declared by the active registration.
+   * @param data - losslessly JSON-serializable plugin payload.
+   * @returns the committed immutable event with its external reader reference.
+   * @throws {Error} when the session is not live in this store or no active registration accepts the event.
+   */
+  appendRequiredExternalEvent(session: Session, type: string, data: unknown): SessionEvent {
+    this.liveEntryFor(session)
+    return appendRegisteredExternalEvent(session, type, data, payload => this.requiredExternalEvents.resolve(type, payload))
+  }
+
+  /**
+   * Snapshot the active external vocabulary for one cold persistence read.
+   * @returns immutable validator whose identity changes with registrations.
+   */
+  requiredExternalEventValidation(): RequiredExternalSessionEventValidation {
+    return this.requiredExternalEvents.snapshot()
   }
 
   /**

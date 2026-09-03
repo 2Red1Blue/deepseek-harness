@@ -420,6 +420,46 @@ export interface SurfaceIntent {
   sourceEventSeqs?: SessionSeq[]
 }
 
+/** Immutable reader identity stamped on one required external Session event. */
+export interface RequiredExternalSessionEventRef {
+  /** Namespace owned by the plugin that defines the event type and payload validator. */
+  readonly namespace: string
+  /** Positive schema version selected by the writer registration. */
+  readonly version: number
+}
+
+/** One event type and payload validator supplied by an external plugin. */
+export interface RequiredExternalSessionEventDefinition {
+  /** Event type beginning with the registration namespace followed by `/`. */
+  readonly type: string
+  /** Refuse data the owning plugin version cannot reconstruct. */
+  validate(data: unknown): void
+}
+
+/** Declarative registration for one required external Session event vocabulary version. */
+export interface RequiredExternalSessionEventRegistration extends RequiredExternalSessionEventRef {
+  /** Exact required event types that this plugin version can write and cold-read. */
+  readonly events: readonly RequiredExternalSessionEventDefinition[]
+}
+
+/** Result of resolving one durable external event against a reader-registration snapshot. */
+export type RequiredExternalSessionEventValidationResult =
+  | { readonly kind: 'valid' }
+  | { readonly kind: 'unavailable'; readonly reason: string }
+  | { readonly kind: 'invalid'; readonly reason: string }
+
+/** Immutable external-event reader registrations captured for one storage read. */
+export interface RequiredExternalSessionEventValidation {
+  /** Changes whenever an external event registration enters or leaves the SessionStore. */
+  readonly generation: number
+  /** Validate a persisted external event identity and payload. */
+  validate(
+    ref: RequiredExternalSessionEventRef,
+    type: string,
+    data: unknown,
+  ): RequiredExternalSessionEventValidationResult
+}
+
 /**
  * One immutable entry in the session log.
  *
@@ -452,6 +492,13 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
      * inconvenience) rather than silently resuming a gutted session.
      */
     ignorable?: true
+    /**
+     * Identifies the exact external plugin vocabulary needed to reconstruct
+     * this event. The value is written only through a registered
+     * {@link SessionStore} registration. A reader without an exact registration must
+     * refuse the log; it must never treat this required record as ignorable.
+     */
+    requiredExternal?: RequiredExternalSessionEventRef
   } & (K extends SurfaceEventType ? {
     /**
      * Seq numbers of earlier events that this event cites as sources

@@ -8,10 +8,11 @@
 import {
   adoptSessionEvent,
   KNOWN_SESSION_EVENT_TYPES,
+  requiredExternalSessionEventRef,
   SESSION_FORMAT_VERSION,
 } from '@deepseek-ai/dsh-session'
 import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
-import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+import type { RequiredExternalSessionEventValidation, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import {
   SessionFormatUnsupportedError,
   SessionPersistenceCorruptionError,
@@ -52,13 +53,16 @@ export function assertVersion(meta: SessionHeader, location?: SessionLocation): 
 /**
  * Validate one exclusively owned stored event array in place: adopt each
  * record (validating and freezing it) and refuse any event type this build
- * does not know, unless its writer marked it `ignorable: true` — silently
- * skipping an unknown required event could reconstruct a wrong session (the
- * envelope contract on `SessionEvent.ignorable`). Both newer vocabularies and
- * retired pre-release shapes refuse here; this build ships no migration.
+ * does not know, unless its writer marked it `ignorable: true` or an active
+ * external-reader registration owns its exact `requiredExternal` identity.
+ * Silently skipping an unknown required event could reconstruct a wrong
+ * session (the envelope contract on `SessionEvent.ignorable`). Both newer
+ * vocabularies and retired pre-release shapes refuse here; this build ships no
+ * migration.
  * @param meta - the stored header the events belong to.
  * @param events - exclusively owned decoded events; validated in place.
  * @param location - the backend's artifact location for refusals, when one exists.
+ * @param requiredExternal - current plugin-owned reader vocabulary, when a SessionStore is mounted.
  * @returns the same array, validated and frozen.
  * @throws {SessionFormatUnsupportedError} for unknown event types.
  * @throws {SessionPersistenceCorruptionError} for records that fail validation.
@@ -67,8 +71,46 @@ export function validateStoredEvents(
   meta: SessionHeader,
   events: SessionEvent[],
   location?: SessionLocation,
+  requiredExternal?: RequiredExternalSessionEventValidation,
 ): SessionEvent[] {
   for (const event of events) {
+    let externalRef
+    try {
+      externalRef = requiredExternalSessionEventRef((event as Record<string, unknown>)['requiredExternal'])
+    } catch (error: unknown) {
+      throw new SessionPersistenceCorruptionError(
+        `stored session "${meta.id}" has an invalid requiredExternal marker at seq ${event.seq}`,
+        { cause: error },
+      )
+    }
+    if (externalRef !== undefined) {
+      if (event.ignorable === true) {
+        throw new SessionPersistenceCorruptionError(
+          `stored session "${meta.id}" marks event "${event.type}" (seq ${event.seq}) as both ignorable and requiredExternal`,
+          { cause: new Error('mutually exclusive event markers') },
+        )
+      }
+      if (KNOWN_SESSION_EVENT_TYPES.has(event.type)) {
+        throw new SessionPersistenceCorruptionError(
+          `stored session "${meta.id}" assigns requiredExternal to Harness event "${event.type}" (seq ${event.seq})`,
+          { cause: new Error('Harness event cannot use external marker') },
+        )
+      }
+      const result = requiredExternal?.validate(externalRef, event.type, event.data)
+      if (result === undefined || result.kind === 'unavailable') {
+        throw unsupported(
+          `session "${meta.id}" contains required external event "${event.type}" (seq ${event.seq}) for ${externalRef.namespace} v${String(externalRef.version)}, but this runtime has no matching registration; refusing to interpret the log`,
+          location,
+        )
+      }
+      if (result.kind === 'invalid') {
+        throw new SessionPersistenceCorruptionError(
+          `stored session "${meta.id}" has invalid payload for required external event "${event.type}" (seq ${event.seq}): ${result.reason}`,
+          { cause: new Error(result.reason) },
+        )
+      }
+      continue
+    }
     if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true) {
       throw unsupported(
         `session "${meta.id}" contains event type "${event.type}" (seq ${event.seq}) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness`,

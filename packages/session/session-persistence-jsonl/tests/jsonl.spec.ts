@@ -5,7 +5,7 @@ import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, sym
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+import type { RequiredExternalSessionEventRegistration, SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import {
@@ -94,6 +94,19 @@ async function freshRoot(): Promise<string> {
 
 function rawLogPath(root: string, cwd: string | undefined, id: SessionId): string {
   return logPath(root, cwd, id, 'none')
+}
+
+const requiredExternalRegistration: RequiredExternalSessionEventRegistration = {
+  namespace: 'roundtable-director',
+  version: 1,
+  events: [{
+    type: 'roundtable-director/run',
+    validate(data: unknown): void {
+      if (typeof data !== 'object' || data === null || (data as Record<string, unknown>)['runId'] !== 'run-1') {
+        throw new Error('run event requires runId "run-1"')
+      }
+    },
+  }],
 }
 
 /** Create + append + close: persist one whole log through the write handle. */
@@ -417,6 +430,56 @@ describe('JsonlSessionPersistence: stored-format refusals', () => {
 
     await expect(readAll(ctx.sessionPersistence, m.id))
       .rejects.toThrow(/unsupported legacy reason "fallback"/)
+  })
+})
+
+describe('JsonlSessionPersistence: required external events', () => {
+  it('cold-reads an external event only while the matching registration effect remains active', async () => {
+    const externalRoot = await freshRoot()
+    const writer = new Context()
+    await writer.plugin(SessionStore)
+    await writer.plugin(JsonlSessionPersistence, { root: externalRoot, compression: 'none' })
+    const writerRegistration = writer.effect(
+      () => writer.sessions.registerRequiredExternalEvents(requiredExternalRegistration),
+      'test required external writer vocabulary',
+    )
+    const session = writer.sessions.create(SessionId('required-external'), { meta: { cwd: '/work' } })
+    const event = writer.sessions.appendRequiredExternalEvent(session, 'roundtable-director/run', { runId: 'run-1' })
+    await writeLog(writer.sessionPersistence, session.header, [event])
+    expect(await readFile(rawLogPath(externalRoot, '/work', session.id), 'utf8')).toContain('requiredExternal')
+    writerRegistration()
+    await writer.fiber.dispose()
+
+    const missing = new Context()
+    await missing.plugin(SessionStore)
+    await missing.plugin(JsonlSessionPersistence, { root: externalRoot, compression: 'none' })
+    const missingResult = await readAll(missing.sessionPersistence, session.id).then(
+      () => 'opened',
+      (error: unknown) => error instanceof Error ? error.name : String(error),
+    )
+    expect(missingResult).toBe('SessionFormatUnsupportedError')
+    await missing.fiber.dispose()
+
+    const reader = new Context()
+    await reader.plugin(SessionStore)
+    await reader.plugin(JsonlSessionPersistence, { root: externalRoot, compression: 'none' })
+    const readerRegistration = reader.effect(
+      () => reader.sessions.registerRequiredExternalEvents(requiredExternalRegistration),
+      'test required external reader vocabulary',
+    )
+    const restored = await readAll(reader.sessionPersistence, session.id)
+    expect(restored.events).toMatchObject([{
+      type: 'roundtable-director/run',
+      requiredExternal: { namespace: 'roundtable-director', version: 1 },
+    }])
+
+    readerRegistration()
+    const removedResult = await readAll(reader.sessionPersistence, session.id).then(
+      () => 'opened',
+      (error: unknown) => error instanceof Error ? error.name : String(error),
+    )
+    expect(removedResult).toBe('SessionFormatUnsupportedError')
+    await reader.fiber.dispose()
   })
 })
 

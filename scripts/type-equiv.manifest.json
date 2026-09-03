@@ -471,6 +471,31 @@
     },
     {
       "doc": "docs/subsystems/session.md",
+      "symbol": "RequiredExternalSessionEventRef",
+      "source": "packages/core/session/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/session.md",
+      "symbol": "RequiredExternalSessionEventDefinition",
+      "source": "packages/core/session/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/session.md",
+      "symbol": "RequiredExternalSessionEventRegistration",
+      "source": "packages/core/session/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/session.md",
+      "symbol": "RequiredExternalSessionEventValidationResult",
+      "source": "packages/core/session/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/session.md",
+      "symbol": "RequiredExternalSessionEventValidation",
+      "source": "packages/core/session/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/session.md",
       "symbol": "SessionSeq",
       "source": "packages/core/session/src/types.ts"
     },

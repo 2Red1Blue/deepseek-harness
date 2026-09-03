@@ -1734,6 +1734,26 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'In-memory session store (`ctx.sessions`).\n\nPersistence is intentionally not implemented here — the agent lifecycle attaches a session-log writer to each published session\'s write handle; a session published outside that lifecycle persists nothing.',
     methods: [
       {
+        signature: 'registerRequiredExternalEvents(registration: RequiredExternalSessionEventRegistration): () => void',
+        description: 'Register one plugin-owned required external vocabulary for the lifetime of its caller\'s Cordis effect.',
+        parameters: [{ name: 'registration', description: 'namespace, schema version, event types, and payload validators.' }],
+        returns: 'an idempotent disposer that removes the vocabulary.',
+        throws: ['{TypeError} when the registration cannot identify one external vocabulary.', '{Error} when another active registration owns one of its event types.'],
+      },
+      {
+        signature: 'appendRequiredExternalEvent(session: Session, type: string, data: unknown): SessionEvent',
+        description: 'Append one required external event to a live session using its current plugin registration; ordinary Session.append cannot add this marker.',
+        parameters: [{ name: 'session', description: 'live session owned by this store.' }, { name: 'type', description: 'one exact type declared by the active registration.' }, { name: 'data', description: 'losslessly JSON-serializable plugin payload.' }],
+        returns: 'the committed immutable event with its external reader reference.',
+        throws: ['{Error} when the session is not live in this store or no active registration accepts the event.'],
+      },
+      {
+        signature: 'requiredExternalEventValidation(): RequiredExternalSessionEventValidation',
+        description: 'Snapshot the active external vocabulary for one cold persistence read.',
+        parameters: [],
+        returns: 'immutable validator whose identity changes with registrations.',
+      },
+      {
         signature: 'create(id?: SessionId, options?: CreateSessionOptions): Session',
         description: 'Create a session owned by the calling fiber: disposing that fiber stops event notification and removes the session from the store. `options.seed` populates the session with a copy of those events (replay/fork); `options.meta` attaches creation metadata (validated absolute `cwd`, seed and parent lineage, and delegation depth) as the immutable SessionHeader (the store fills `version`/`id`/`createdAt`).\n\nFor an agent whose session must be torn down IN ORDER with its loop (so the loop\'s final events are published before the store attachment ends), do NOT use this — fold the session lifecycle into the agent\'s own effect via prepare + enter + announce (see `dsh-agent-loop`\'s creation transaction).',
         parameters: [{ name: 'id', description: 'the session id; omitted, the store mints `session-<n>`.' }, { name: 'options', description: 'seed events and/or creation metadata for the header.' }],
@@ -4641,6 +4661,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type RequestRunOutcome = \'approved\' | \'completed\' | \'rejected\' | \'cancelled\' | \'failed\';',
   },
   {
+    name: 'RequiredExternalSessionEventDefinition',
+    declaration: 'export interface RequiredExternalSessionEventDefinition {\n    readonly type: string;\n    validate(data: unknown): void;\n}',
+  },
+  {
+    name: 'RequiredExternalSessionEventRef',
+    declaration: 'export interface RequiredExternalSessionEventRef {\n    readonly namespace: string;\n    readonly version: number;\n}',
+  },
+  {
+    name: 'RequiredExternalSessionEventRegistration',
+    declaration: 'export interface RequiredExternalSessionEventRegistration extends RequiredExternalSessionEventRef {\n    readonly events: readonly RequiredExternalSessionEventDefinition[];\n}',
+  },
+  {
+    name: 'RequiredExternalSessionEventValidation',
+    declaration: 'export interface RequiredExternalSessionEventValidation {\n    readonly generation: number;\n    validate(ref: RequiredExternalSessionEventRef, type: string, data: unknown): RequiredExternalSessionEventValidationResult;\n}',
+  },
+  {
+    name: 'RequiredExternalSessionEventValidationResult',
+    declaration: 'export type RequiredExternalSessionEventValidationResult = {\n    readonly kind: \'valid\';\n} | {\n    readonly kind: \'unavailable\';\n    readonly reason: string;\n} | {\n    readonly kind: \'invalid\';\n    readonly reason: string;\n};',
+  },
+  {
     name: 'ResolvedAlwaysRetryPolicy',
     declaration: 'export interface ResolvedAlwaysRetryPolicy extends ResolvedRetryBackoff {\n    readonly mode: \'always\';\n}',
   },
@@ -4802,7 +4842,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionEvent',
-    declaration: 'export type SessionEvent<T extends SessionEventType = SessionEventType> = {\n    [K in SessionEventType]: {\n        type: K;\n        seq: SessionSeq;\n        time: number;\n        data: SessionEventMap[K];\n        ignorable?: true;\n    } & (K extends SurfaceEventType ? {\n        sourceEventSeqs?: SessionSeq[];\n        surfaceOp?: SurfaceOp;\n    } : object);\n}[T];',
+    declaration: 'export type SessionEvent<T extends SessionEventType = SessionEventType> = {\n    [K in SessionEventType]: {\n        type: K;\n        seq: SessionSeq;\n        time: number;\n        data: SessionEventMap[K];\n        ignorable?: true;\n        requiredExternal?: RequiredExternalSessionEventRef;\n    } & (K extends SurfaceEventType ? {\n        sourceEventSeqs?: SessionSeq[];\n        surfaceOp?: SurfaceOp;\n    } : object);\n}[T];',
   },
   {
     name: 'SessionEventEntry',

@@ -300,6 +300,8 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   RequestErrorAction: 'core.md',
   RequestFailureContext: 'core.md',
   PreparedReferencedMessage: 'session-reference.md',
+  RequiredExternalSessionEventRegistration: 'session.md',
+  RequiredExternalSessionEventValidation: 'session.md',
   FileReferenceCandidate: 'session-reference.md',
   SessionReferenceCandidate: 'session-reference.md',
   SessionReferenceMentionCandidate: 'session-reference.md',

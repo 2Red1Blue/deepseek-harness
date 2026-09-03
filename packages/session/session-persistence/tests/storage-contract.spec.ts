@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { RequiredExternalSessionEventValidation, SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   SessionAlreadyExistsError,
   SessionAlreadyOwnedError,
@@ -27,6 +27,30 @@ import type { SessionLocation } from '../src/index.ts'
 import { meta } from './contract.ts'
 
 const LOCATION: SessionLocation = { kind: 'jsonl', path: '/store/session.jsonl' }
+
+const externalValidation: RequiredExternalSessionEventValidation = {
+  generation: 1,
+  validate(ref, type, data) {
+    if (ref.namespace !== 'roundtable-director' || ref.version !== 1 || type !== 'roundtable-director/run') {
+      return { kind: 'unavailable', reason: 'unexpected external vocabulary' }
+    }
+    if (typeof data !== 'object' || data === null || (data as Record<string, unknown>)['runId'] !== 'run-1') {
+      return { kind: 'invalid', reason: 'run event requires runId "run-1"' }
+    }
+    return { kind: 'valid' }
+  },
+}
+
+function externalEvent(overrides: Record<string, unknown> = {}): SessionEvent {
+  return {
+    type: 'roundtable-director/run',
+    seq: 0,
+    time: 1,
+    data: { runId: 'run-1' },
+    requiredExternal: { namespace: 'roundtable-director', version: 1 },
+    ...overrides,
+  } as unknown as SessionEvent
+}
 
 /** A stored user/message event with a well-formed identified message. */
 function userMessage(seq: number): SessionEvent {
@@ -145,6 +169,48 @@ describe('validateStoredEvents', () => {
     ] as unknown as SessionEvent[]
     expect(validateStoredEvents(m, events)).toBe(events)
     expect(events[0]).toMatchObject({ type: 'foreign/telemetry', ignorable: true })
+  })
+
+  it('accepts a matching required external event only with its exact reader vocabulary', () => {
+    const m = meta('external-supported')
+    const events = [externalEvent()]
+
+    expect(validateStoredEvents(m, events, undefined, externalValidation)).toBe(events)
+    expect(events[0]).toMatchObject({
+      type: 'roundtable-director/run',
+      requiredExternal: { namespace: 'roundtable-director', version: 1 },
+    })
+  })
+
+  it('refuses a required external event without an exact reader vocabulary', () => {
+    const m = meta('external-missing')
+    const events = [externalEvent()]
+
+    expect(() => validateStoredEvents(m, events, LOCATION)).toThrow(SessionFormatUnsupportedError)
+    expect(() => validateStoredEvents(m, events, LOCATION)).toThrow('no matching registration')
+    expect(() => validateStoredEvents(m, events, LOCATION)).toThrow(`(raw log: ${LOCATION.path})`)
+  })
+
+  it('classifies malformed markers and invalid external payloads as corruption', () => {
+    const malformed = [externalEvent({ requiredExternal: { namespace: 'roundtable-director', version: 0 } })]
+    expect(() => validateStoredEvents(meta('external-malformed'), malformed, undefined, externalValidation))
+      .toThrow(SessionPersistenceCorruptionError)
+
+    const invalidPayload = [externalEvent({ data: { runId: 'wrong' } })]
+    expect(() => validateStoredEvents(meta('external-invalid'), invalidPayload, undefined, externalValidation))
+      .toThrow(SessionPersistenceCorruptionError)
+    expect(() => validateStoredEvents(meta('external-invalid'), invalidPayload, undefined, externalValidation))
+      .toThrow('requires runId')
+  })
+
+  it('refuses contradictory or first-party external markers as corruption', () => {
+    const contradictory = [externalEvent({ ignorable: true })]
+    expect(() => validateStoredEvents(meta('external-contradictory'), contradictory, undefined, externalValidation))
+      .toThrow(SessionPersistenceCorruptionError)
+
+    const firstParty = [externalEvent({ type: 'turn/start', data: { turn: 1 } })]
+    expect(() => validateStoredEvents(meta('external-first-party'), firstParty, undefined, externalValidation))
+      .toThrow(SessionPersistenceCorruptionError)
   })
 
   it('refuses the retired request/header "fallback" reason while accepting current headers', () => {

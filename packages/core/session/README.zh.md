@@ -49,6 +49,10 @@ session.deriveMessages()         // the derived model history
 
 表层事件（`user/message`、`assistant/message`、`tool/result`）必须声明如何进入有序 surface；原始分片、边界与其他仅日志事件从不产生消息。
 
+### 写入必需外部事件
+
+事件会改变其重建状态的插件在 effect 中注册命名空间、schema 版本、事件类型与载荷校验器：`ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(registration))`。它通过 `ctx.sessions.appendRequiredExternalEvent(session, type, data)` 写入这些类型，后者会写入持久化的 `requiredExternal` 标识。冷持久化读取要求存在精确且活跃的注册，并重新校验载荷；缺少注册会拒绝日志，格式错误的标记或载荷属于损坏。`session.append()` 仍用于 Harness 自有事件和仅实时的扩展事件，不能写入此标记。
+
 ### 读取日志
 
 `session.seq` 无需物化数组即可读取当前日志长度，`session.eventAt(seq)` 按序列号读取单个已接受且深度冻结的事件。`session.snapshotEvents(fromSeq?, toSeqExclusive?)` 会物化半开区间的冻结稳定快照；当前完整快照会缓存到下一次追加。只需要长度或单个事件的调用方使用 `seq` 或 `eventAt()`。
@@ -89,6 +93,7 @@ session.deriveMessages()         // the derived model history
 |---|---|
 | [`src/index.ts`](src/index.ts) | 插件入口：`SessionStore` 服务、存储生命周期、`fork`、`flush` |
 | [`src/types.ts`](src/types.ts) | `SessionEventMap`、`SessionEvent`、`UserMessage`、`SessionHeader`、`TurnEndReasonMap` |
+| [`src/external-events.ts`](src/external-events.ts) | effect 所有的外部事件注册、写入标记与冷读取校验快照 |
 | [`src/surface.ts`](src/surface.ts) | 有序 surface 投影、替换校验、`deriveEventMessage` |
 | [`src/request-header.ts`](src/request-header.ts) | `request/header` 折叠与重建 |
 | [`dsh-util-values`](../../util/values/README.zh.md) | 共享无损 JSON 校验与分离式快照 |
@@ -178,7 +183,7 @@ session.deriveMessages()         // the derived model history
 这些限制说明会话存储何时需要特别留意。它们是当前包约束，不是任务积压。
 
 - **`fork()` 仅在实时会话的稳定边界处切分**：所选前缀结束时不得有开放轮次，且源会话必须位于存储中；[fork API](../../../.agents/notes/implemented/feature/2026-06-30-session-store-fork-api.zh.md) 不支持对已持久化但未加载的会话进行 fork。
-- **`SESSION_FORMAT_VERSION` 固定为 `0`**：预发布阶段不承诺广泛兼容性；`Session` 只接受当前 seed 形状，后端拒绝任何其他版本，不认识的事件类型也会拒绝重建，除非信封带 `ignorable` 标记（[机制](../../../.agents/notes/implemented/architecture/2026-08-10-session-log-version-mechanism.zh.md)）。
+- **`SESSION_FORMAT_VERSION` 固定为 `0`**：预发布阶段不承诺广泛兼容性；`Session` 只接受当前 seed 形状，后端拒绝任何其他版本，不认识的事件类型要么携带 `ignorable`，要么必须有精确且活跃的 `requiredExternal` 插件注册才能重建（[机制](../../../.agents/notes/implemented/architecture/2026-08-10-session-log-version-mechanism.zh.md)）。
 - **`TurnEndReasonMap` 不含 ACP（Agent Client Protocol）命名的 `refusal`／`max_turn_requests` 变体**：受生产方约束；只有当适配器或循环首次产生这些变体时才加入。
 - **fork 之外没有会话树**：基于分支会话的 pi 风格条目树被推迟，除非消费方需要超越基于边界的 forking 的能力。
 

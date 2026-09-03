@@ -201,6 +201,60 @@ type OptionalSessionSeq = SessionSeq | null
 
 `SessionSeq(value)` 与 `SessionLogOffset(value)` 只接纳非负安全整数，并拒绝负零。它们仅添加编译期品牌，不改变序列化后的数值；算术会返回普通 `number`，调用方必须按结果的预期角色通过对应构造器重新接纳。
 
+### 必需外部事件读取方
+
+重建状态会受影响的外部插件通过 `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(...))` 注册其精确命名空间、schema 版本、事件类型与校验器，然后只能通过 `ctx.sessions.appendRequiredExternalEvent(...)` 写入。持久化信封记录注册标识；冷存储读取要求存在匹配且活跃的注册，并校验载荷。缺失或已释放的注册会拒绝日志，格式错误的标记或无效载荷属于损坏。JSONL 会将读取方注册快照与文件版本一起缓存，因此卸载插件后不会复用曾被接受的日志。
+
+```ts type-equiv
+/** Immutable reader identity stamped on one required external Session event. */
+interface RequiredExternalSessionEventRef {
+  /** Namespace owned by the plugin that defines the event type and payload validator. */
+  readonly namespace: string
+  /** Positive schema version selected by the writer registration. */
+  readonly version: number
+}
+```
+
+```ts type-equiv
+/** One event type and payload validator supplied by an external plugin. */
+interface RequiredExternalSessionEventDefinition {
+  /** Event type beginning with the registration namespace followed by `/`. */
+  readonly type: string
+  /** Refuse data the owning plugin version cannot reconstruct. */
+  validate(data: unknown): void
+}
+```
+
+```ts type-equiv
+/** Declarative registration for one required external Session event vocabulary version. */
+interface RequiredExternalSessionEventRegistration extends RequiredExternalSessionEventRef {
+  /** Exact required event types that this plugin version can write and cold-read. */
+  readonly events: readonly RequiredExternalSessionEventDefinition[]
+}
+```
+
+```ts type-equiv
+/** Result of resolving one durable external event against a reader-registration snapshot. */
+type RequiredExternalSessionEventValidationResult =
+  | { readonly kind: 'valid' }
+  | { readonly kind: 'unavailable'; readonly reason: string }
+  | { readonly kind: 'invalid'; readonly reason: string }
+```
+
+```ts type-equiv
+/** Immutable external-event reader registrations captured for one storage read. */
+interface RequiredExternalSessionEventValidation {
+  /** Changes whenever an external event registration enters or leaves the SessionStore. */
+  readonly generation: number
+  /** Validate a persisted external event identity and payload. */
+  validate(
+    ref: RequiredExternalSessionEventRef,
+    type: string,
+    data: unknown,
+  ): RequiredExternalSessionEventValidationResult
+}
+```
+
 ```ts type-equiv
 /**
  * One immutable entry in the session log.
@@ -234,6 +288,13 @@ type SessionEvent<T extends SessionEventType = SessionEventType> = {
      * inconvenience) rather than silently resuming a gutted session.
      */
     ignorable?: true
+    /**
+     * Identifies the exact external plugin vocabulary needed to reconstruct
+     * this event. The value is written only through a registered
+     * {@link SessionStore} registration. A reader without an exact registration must
+     * refuse the log; it must never treat this required record as ignorable.
+     */
+    requiredExternal?: RequiredExternalSessionEventRef
   } & (K extends SurfaceEventType ? {
     /**
      * Seq numbers of earlier events that this event cites as sources
@@ -251,6 +312,8 @@ type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```
 
 `SessionEventType = keyof SessionEventMap`。由于 `SessionEventMap` 可通过合并扩展，对 `SessionEvent` 的 switch 语句禁止使用 `assertNever`：插件添加的变体是合法的未知值；处理已知 case 后在 `default` 中放行。
+
+`ignorable` 与 `requiredExternal` 互斥。`ignorable` 表示可跳过未知的信息性事件；`requiredExternal` 表示未知的状态变化事件只能由其归属的插件版本重建。Harness 自有事件类型不能携带 `requiredExternal`。
 
 对于 `assistant/message`，存在的 `sourceEventSeqs: []` 表示提供方流已知且完整地为空；旧格式或外部事件缺少该字段时，没有记录这条消息由哪些早期事件产生。agent loop 会为每次成功的模型调用写入该字段；其他 surface 事件只要包含该字段，其列表就必须非空。
 
@@ -819,6 +882,33 @@ In-memory session store (`ctx.sessions`).
 Persistence is intentionally not implemented here — the agent lifecycle attaches a session-log writer to each published session's write handle; a session published outside that lifecycle persists nothing.
 
 ```ts cordis-catalog
+/**
+ * Register one plugin-owned required external vocabulary for the lifetime of
+ * its caller's Cordis effect.
+ * @param registration - namespace, schema version, event types, and payload validators.
+ * @returns an idempotent disposer that removes the vocabulary.
+ * @throws {TypeError} when the registration cannot identify one external vocabulary.
+ * @throws {Error} when another active registration owns one of its event types.
+ */
+registerRequiredExternalEvents(registration: RequiredExternalSessionEventRegistration): () => void
+
+/**
+ * Append one required external event to a live session using its current
+ * plugin registration; ordinary {@link Session.append} cannot add this marker.
+ * @param session - live session owned by this store.
+ * @param type - one exact type declared by the active registration.
+ * @param data - losslessly JSON-serializable plugin payload.
+ * @returns the committed immutable event with its external reader reference.
+ * @throws {Error} when the session is not live in this store or no active registration accepts the event.
+ */
+appendRequiredExternalEvent(session: Session, type: string, data: unknown): SessionEvent
+
+/**
+ * Snapshot the active external vocabulary for one cold persistence read.
+ * @returns immutable validator whose identity changes with registrations.
+ */
+requiredExternalEventValidation(): RequiredExternalSessionEventValidation
+
 /**
  * Create a session owned by the calling fiber: disposing that fiber stops
  * event notification and removes the session from the store. `options.seed`

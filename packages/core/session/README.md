@@ -49,6 +49,10 @@ session.deriveMessages()         // the derived model history
 
 Surface events (`user/message`, `assistant/message`, `tool/result`) must declare how they join the ordered surface; raw chunks, boundaries, and other log-only events never produce a message.
 
+### Write required external events
+
+A plugin whose event changes its reconstructed state registers its namespace, schema version, event types, and payload validators in an effect: `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(registration))`. It writes those types through `ctx.sessions.appendRequiredExternalEvent(session, type, data)`, which stamps the durable `requiredExternal` identity. Cold persistence reads require the exact active registration and revalidate the payload; a missing registration refuses the log, and a malformed marker or payload is corruption. `session.append()` remains for Harness-owned and live-only extension events and cannot write this marker.
+
 ### Read the log
 
 `session.seq` reads the current log length without materializing an array, and `session.eventAt(seq)` reads one accepted, deeply frozen event by sequence number. `session.snapshotEvents(fromSeq?, toSeqExclusive?)` materializes a frozen, stable snapshot of a half-open range; a complete current snapshot is cached until the next append. Callers that only need a length or one event use `seq` or `eventAt()`.
@@ -89,6 +93,7 @@ The package is built on event sourcing: a `Session` is an append-only log of typ
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: `SessionStore` service, store lifecycle, `fork`, `flush` |
 | [`src/types.ts`](src/types.ts) | `SessionEventMap`, `SessionEvent`, `UserMessage`, `SessionHeader`, `TurnEndReasonMap` |
+| [`src/external-events.ts`](src/external-events.ts) | Effect-owned external event registration, writer stamps, and cold-read validation snapshots |
 | [`src/surface.ts`](src/surface.ts) | Ordered surface projection, replacement validation, `deriveEventMessage` |
 | [`src/request-header.ts`](src/request-header.ts) | `request/header` folding and reconstruction |
 | [`dsh-util-values`](../../util/values/README.md) | Shared lossless JSON validation and detached snapshots |
@@ -178,7 +183,7 @@ Logging causes no invalidation, and exact reconstruction preserves request-prefi
 These limits define when the session store needs special care. They are current package constraints, not a task backlog.
 
 - **`fork()` cuts only at stable boundaries of live sessions** — the selected prefix must end outside an open turn and the source must be in the store; forking a persisted-but-unloaded session is excluded from the [fork API](../../../.agents/notes/implemented/feature/2026-06-30-session-store-fork-api.md).
-- **`SESSION_FORMAT_VERSION` stays pinned at `0`** — pre-release, no broad compatibility implied: `Session` accepts only current seed shapes, a backend refuses any other version, and unknown event types refuse reconstruction unless marked `ignorable` in the envelope ([mechanism](../../../.agents/notes/implemented/architecture/2026-08-10-session-log-version-mechanism.md)).
+- **`SESSION_FORMAT_VERSION` stays pinned at `0`** — pre-release, no broad compatibility implied: `Session` accepts only current seed shapes, a backend refuses any other version, and an unknown event type either carries `ignorable` or needs its exact active `requiredExternal` plugin registration to reconstruct ([mechanism](../../../.agents/notes/implemented/architecture/2026-08-10-session-log-version-mechanism.md)).
 - **`TurnEndReasonMap` omits the ACP-named `refusal` / `max_turn_requests` variants** — producer-gated: they land when an adapter or the loop first emits them.
 - **No session tree beyond fork** — a pi-style entry tree over branched sessions is deferred unless a consumer needs more than boundary-based forking.
 
