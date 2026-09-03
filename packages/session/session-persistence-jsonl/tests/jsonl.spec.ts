@@ -467,18 +467,56 @@ describe('JsonlSessionPersistence: required external events', () => {
       () => reader.sessions.registerRequiredExternalEvents(requiredExternalRegistration),
       'test required external reader vocabulary',
     )
+    const service = reader.sessionPersistence as unknown as {
+      readStableFile(path: string, signal?: AbortSignal): Promise<unknown>
+    }
+    const originalReadStableFile = service.readStableFile.bind(service)
+    const readGate = Promise.withResolvers<undefined>()
+    const readStarted = Promise.withResolvers<undefined>()
+    vi.spyOn(service, 'readStableFile').mockImplementationOnce(async (...args) => {
+      readStarted.resolve(undefined)
+      await readGate.promise
+      return originalReadStableFile(...args)
+    })
+    const interruptedRead = readAll(reader.sessionPersistence, session.id)
+    await readStarted.promise
+    readerRegistration()
+    readGate.resolve(undefined)
+    await expect(interruptedRead).rejects.toThrow('no matching registration')
+
+    const activeRegistration = reader.effect(
+      () => reader.sessions.registerRequiredExternalEvents(requiredExternalRegistration),
+      'test required external reader vocabulary after interrupted read',
+    )
     const restored = await readAll(reader.sessionPersistence, session.id)
     expect(restored.events).toMatchObject([{
       type: 'roundtable-director/run',
       requiredExternal: { namespace: 'roundtable-director', version: 1 },
     }])
 
-    readerRegistration()
+    activeRegistration()
     const removedResult = await readAll(reader.sessionPersistence, session.id).then(
       () => 'opened',
       (error: unknown) => error instanceof Error ? error.name : String(error),
     )
     expect(removedResult).toBe('SessionFormatUnsupportedError')
+
+    const selfReleasingRegistration = reader.effect(() => reader.sessions.registerRequiredExternalEvents({
+      namespace: 'roundtable-director',
+      version: 1,
+      events: [{
+        type: 'roundtable-director/run',
+        validate(data: unknown): void {
+          if (typeof data !== 'object' || data === null || (data as Record<string, unknown>)['runId'] !== 'run-1') {
+            throw new Error('run event requires runId "run-1"')
+          }
+          releaseDuringValidation()
+        },
+      }],
+    }), 'test required external reader vocabulary self-releasing')
+    const releaseDuringValidation = selfReleasingRegistration
+    await expect(readAll(reader.sessionPersistence, session.id))
+      .rejects.toThrow('required external reader registration changed while reading')
 
     const reactivatedRegistration = reader.effect(
       () => reader.sessions.registerRequiredExternalEvents(requiredExternalRegistration),

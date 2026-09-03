@@ -62,7 +62,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 
 ### 失败与恢复
 
-当前构建无法忠实解读的存储日志会以方向感知的错误被拒绝，绝不错读。`SESSION_FORMAT_VERSION` 保持 v0，本构建不提供格式迁移路径；更高版本会要求操作者升级 harness。解码器只接受下文点名的有限同版本记录变体。本构建不认识的事件类型会被拒绝，除非其信封标记为 `ignorable`，或活动 Session store 拥有精确的 `requiredExternal` 注册并接受其载荷；格式错误的标记或被拒绝的载荷以 `SessionPersistenceCorruptionError` 处理。后端必须挂载在 `ctx.sessions` 可见的位置：没有该 store 的持久化 context 没有外部读取方词汇，因此会拒绝必需外部日志。
+当前构建无法忠实解读的存储日志会以方向感知的错误被拒绝，绝不错读。`SESSION_FORMAT_VERSION` 保持 v0，本构建不提供格式迁移路径；更高版本会要求操作者升级 harness。解码器只接受下文点名的有限同版本记录变体。本构建不认识的事件类型会被拒绝，除非其信封标记为 `ignorable`，或活动 Session store 拥有精确的 `requiredExternal` 注册并接受其载荷；格式错误的标记或被拒绝的载荷以 `SessionPersistenceCorruptionError` 处理。后端必须挂载在 `ctx.sessions` 可见的位置：没有该 store 的持久化 context 没有外部读取方词汇，因此会拒绝必需外部日志。冷读期间注册发生变更也会拒绝，而不会缓存过期的接纳结果。
 
 -----
 

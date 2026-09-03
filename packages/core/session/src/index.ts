@@ -250,8 +250,8 @@ function assertSessionEventEnvelope(
   let requiredExternal: ReturnType<typeof requiredExternalSessionEventRef>
   try {
     requiredExternal = requiredExternalSessionEventRef(event['requiredExternal'])
-  } catch {
-    throw new Error(`seed event at index ${index} has an invalid requiredExternal marker`)
+  } catch (error: unknown) {
+    throw new Error(`seed event at index ${index} has an invalid requiredExternal marker`, { cause: error })
   }
   if (requiredExternal !== undefined) {
     if (event['ignorable'] === true) {
@@ -756,7 +756,11 @@ export class Session {
       throw new Error(`session event "${type}" carries non-JSON-serializable data`)
     }
     assertSupportedRequestHeader(type, dataSnapshot, `session event "${type}"`)
-    const requiredExternal = stamp?.(dataSnapshot)
+    // A required-external validator must validate the exact immutable payload
+    // that enters the durable log; it cannot mutate a detached candidate after
+    // accepting it and before the event commits.
+    const committedData = stamp === undefined ? dataSnapshot : deepFreeze(dataSnapshot)
+    const requiredExternal = stamp?.(committedData)
     const surfaceMetadataSnapshot = snapshotJsonValue(surfaceMetadata)
     if (surfaceMetadataSnapshot === undefined) {
       throw new Error(`session event "${type}" carries non-JSON-serializable surface metadata`)
@@ -769,7 +773,7 @@ export class Session {
       type,
       seq: SessionSeq(this.log.length),
       time: Date.now(),
-      data: dataSnapshot,
+      data: committedData,
       ...requiredExternal === undefined ? {} : { requiredExternal },
       ...(surfaceMetadataSnapshot as { surfaceOp?: unknown; sourceEventSeqs?: unknown }),
     } as SessionEvent)

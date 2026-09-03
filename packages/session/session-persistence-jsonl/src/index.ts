@@ -388,12 +388,12 @@ class JsonlSessionPersistence extends SessionPersistence {
    */
   async readStoredLog(path: string, expectedId: SessionId, signal?: AbortSignal): Promise<StoredLog> {
     signal?.throwIfAborted()
-    const requiredExternalValidation = this.ctx.get('sessions')?.requiredExternalEventValidation()
     const probe = fileRevision(await stat(path, { bigint: true }))
+    const memoValidation = this.ctx.get('sessions')?.requiredExternalEventValidation()
     const memoized = this.coldLogMemo.get(expectedId)
     if (memoized !== undefined
       && memoized.revision === probe
-      && memoized.requiredExternalValidation === requiredExternalValidation) {
+      && memoized.requiredExternalValidation === memoValidation) {
       this.coldLogMemo.delete(expectedId)
       this.coldLogMemo.set(expectedId, memoized)
       return memoized
@@ -440,8 +440,16 @@ class JsonlSessionPersistence extends SessionPersistence {
     assertStoredId(expectedId, parsed.meta)
     const location = this.locate(parsed.meta)
     assertVersion(parsed.meta, location)
-    validateStoredEvents(parsed.meta, parsed.events, location, requiredExternalValidation)
-    const stored: StoredLog = { ...parsed, revision, requiredExternalValidation }
+    const readValidation = this.ctx.get('sessions')?.requiredExternalEventValidation()
+    validateStoredEvents(parsed.meta, parsed.events, location, readValidation)
+    const finalValidation = this.ctx.get('sessions')?.requiredExternalEventValidation()
+    if (parsed.events.some(event => event.requiredExternal !== undefined) && finalValidation !== readValidation) {
+      throw new SessionFormatUnsupportedError(
+        `session "${parsed.meta.id}" required external reader registration changed while reading; retry the read`,
+        location,
+      )
+    }
+    const stored: StoredLog = { ...parsed, revision, requiredExternalValidation: finalValidation }
     this.coldLogMemo.delete(expectedId)
     this.coldLogMemo.set(expectedId, stored)
     for (const oldest of this.coldLogMemo.keys()) {

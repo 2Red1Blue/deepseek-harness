@@ -84,9 +84,9 @@ export function validateStoredEvents(
       )
     }
     if (externalRef !== undefined) {
-      if (event.ignorable === true) {
+      if (event.ignorable !== undefined) {
         throw new SessionPersistenceCorruptionError(
-          `stored session "${meta.id}" marks event "${event.type}" (seq ${event.seq}) as both ignorable and requiredExternal`,
+          `stored session "${meta.id}" marks required external event "${event.type}" (seq ${event.seq}) with an invalid or conflicting ignorable marker`,
           { cause: new Error('mutually exclusive event markers') },
         )
       }

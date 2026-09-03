@@ -12,9 +12,9 @@ Status: implemented
 
 `SessionEvent` 携带可选的 `requiredExternal` 标识，其中含有插件命名空间与正 schema 版本。该标记与 `ignorable` 互斥，Harness 自有事件类型不能携带它。
 
-`SessionStore.registerRequiredExternalEvents()` 接受一个由命名空间事件类型和同步载荷校验器组成的插件词汇，并返回幂等 disposer。插件通过 `ctx.effect()` 拥有该注册。一个事件类型只能有一个活跃写入注册，因此替换其 schema 版本会先释放原注册。`SessionStore.appendRequiredExternalEvent()` 通过活跃注册校验分离后的载荷，并在不可变事件提交前写入精确标识；返回 Promise 的校验器会被拒绝，不会创建未观察的异步检查。普通 `Session.append()` 不能写入此标记。
+`SessionStore.registerRequiredExternalEvents()` 接受一个由命名空间事件类型和同步载荷校验器组成的插件词汇，并返回幂等 disposer。插件通过 `ctx.effect()` 拥有该注册。一个事件类型只能有一个活跃写入注册，因此替换其 schema 版本会先释放原注册。`SessionStore.appendRequiredExternalEvent()` 会在校验前冻结分离载荷，并在不可变事件提交前写入精确标识；返回 Promise 或释放自身注册的校验器都会被拒绝，不会创建未观察的异步检查。普通 `Session.append()` 不能写入此标记。
 
-`validateStoredEvents()` 只在活动读取方快照包含精确命名空间、版本、类型，且校验器接受载荷时，才接纳必需外部记录。缺少注册会产生 `SessionFormatUnsupportedError`；格式错误的标记、Harness 类型上的标记、冲突的 `ignorable` 或被拒绝的载荷会产生 `SessionPersistenceCorruptionError`。`SessionStore.prepare({ seedSource: 'persistence' })` 在构造不可变 Session 前重复进行活动注册校验；直接 seed 和直接调用 `Session.fromRestore()` 会拒绝外部标记。JSONL 在冷日志 memo key 中包含不可变读取方快照标识，因此释放注册后不会复用先前被接受的缓存日志。
+`validateStoredEvents()` 只在活动读取方快照包含精确命名空间、版本、类型，且校验器接受载荷时，才接纳必需外部记录。缺少注册会产生 `SessionFormatUnsupportedError`；格式错误的标记、Harness 类型上的标记、任意并存的 `ignorable` 或被拒绝的载荷会产生 `SessionPersistenceCorruptionError`。`SessionStore.prepare({ seedSource: 'persistence' })` 在构造不可变 Session 前重复进行活动注册校验；直接 seed 和直接调用 `Session.fromRestore()` 会拒绝外部标记。JSONL 会在 I/O 后捕获读取方快照，并在校验后确认其仍然有效才缓存，因此释放注册后不会复用先前被接受的缓存日志。
 
 `SESSION_FORMAT_VERSION` 保持 `0`，因为 Harness 仍处于预发布阶段，不为旧的本地实验日志承诺兼容性。[可忽略外部事件决策](2026-08-30-retain-ignorable-external-session-events.zh.md)仍适用于可安全省略的信息性记录。
 

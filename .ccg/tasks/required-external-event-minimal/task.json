@@ -6,7 +6,7 @@
   "risk": "high",
   "domain": "session-persistence",
   "currentPhase": "review",
-  "nextAction": "提交已修复的审查问题并运行最终窄范围双模型审查",
+  "nextAction": "提交第二轮审查修复并运行最终窄范围双模型审查",
   "createdAt": "2026-09-03T00:00:00+08:00",
   "branch": "codex/required-external-event-minimal"
 }

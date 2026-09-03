@@ -70,6 +70,56 @@ describe('SessionStore required external events', () => {
     secondDispose()
   })
 
+  it('refuses a validator that releases its writer registration before commit', async () => {
+    const ctx = await setup()
+    const selfReleasing: RequiredExternalSessionEventRegistration = {
+      namespace: 'roundtable-releasing',
+      version: 1,
+      events: [{
+        type: 'roundtable-releasing/run',
+        validate(): void {
+          dispose()
+        },
+      }],
+    }
+    const dispose = ctx.sessions.registerRequiredExternalEvents(selfReleasing)
+    const session = ctx.sessions.create(SessionId('external-releasing-validator'))
+
+    expect(() => ctx.sessions.appendRequiredExternalEvent(session, 'roundtable-releasing/run', { runId: 'run-1' }))
+      .toThrow('registration changed during validation')
+    expect(session.snapshotEvents()).toEqual([])
+  })
+
+  it('commits the immutable detached payload its external validator receives', async () => {
+    const ctx = await setup()
+    let mutationRejected = false
+    const mutating: RequiredExternalSessionEventRegistration = {
+      namespace: 'roundtable-immutable',
+      version: 1,
+      events: [{
+        type: 'roundtable-immutable/run',
+        validate(data: unknown): void {
+          if (typeof data !== 'object' || data === null || (data as Record<string, unknown>)['runId'] !== 'run-1') {
+            throw new Error('immutable run event requires runId "run-1"')
+          }
+          try {
+            const mutable = data as { runId: string }
+            mutable.runId = 'wrong'
+          } catch {
+            mutationRejected = true
+          }
+        },
+      }],
+    }
+    const dispose = ctx.sessions.registerRequiredExternalEvents(mutating)
+    const session = ctx.sessions.create(SessionId('external-immutable-validator'))
+
+    const event = ctx.sessions.appendRequiredExternalEvent(session, 'roundtable-immutable/run', { runId: 'run-1' })
+    expect(event.data).toEqual({ runId: 'run-1' })
+    expect(mutationRejected).toBe(true)
+    dispose()
+  })
+
   it('changes the reusable reader snapshot whenever a registration enters or leaves', async () => {
     const ctx = await setup()
     const absent = ctx.sessions.requiredExternalEventValidation()
@@ -180,5 +230,11 @@ describe('SessionStore required external events', () => {
       requiredExternal: { namespace: 'roundtable-director', version: 1 },
     })
     dispose()
+    expect(() => ctx.sessions.prepare(SessionId('external-restored-after-dispose'), {
+      seed: externalSeed(),
+      meta: { ...header(), id: SessionId('external-restored-after-dispose') },
+      inheritedEventCount: SessionLogOffset(0),
+      seedSource: 'persistence',
+    })).toThrow('no valid requiredExternal registration')
   })
 })

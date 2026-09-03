@@ -203,7 +203,7 @@ type OptionalSessionSeq = SessionSeq | null
 
 ### 必需外部事件读取方
 
-重建状态会受影响的外部插件通过 `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(...))` 注册其精确命名空间、schema 版本、事件类型与同步校验器，然后只能通过 `ctx.sessions.appendRequiredExternalEvent(...)` 写入。持久化信封记录注册标识；冷存储读取要求存在匹配且活跃的注册，并校验载荷。缺失或已释放的注册会拒绝日志，格式错误的标记、无效载荷或异步校验器会导致损坏或写入被拒绝。只有 `SessionStore.prepare({ seedSource: 'persistence' })` 可以恢复必需外部记录；直接调用 `Session.create()` 与 `Session.fromRestore()` 会拒绝它。JSONL 会将读取方注册快照与文件版本一起缓存，因此卸载插件后不会复用曾被接受的日志。
+重建状态会受影响的外部插件通过 `ctx.effect(() => ctx.sessions.registerRequiredExternalEvents(...))` 注册其精确命名空间、schema 版本、事件类型与同步校验器，然后只能通过 `ctx.sessions.appendRequiredExternalEvent(...)` 写入。持久化信封记录注册标识；冷存储读取要求存在匹配且活跃的注册，并校验载荷。缺失或已释放的注册会拒绝日志，格式错误的标记、无效载荷或异步校验器会导致损坏或写入被拒绝。校验器接收的分离载荷已不可变，注册在校验或冷读期间失效也会拒绝操作。只有 `SessionStore.prepare({ seedSource: 'persistence' })` 可以恢复必需外部记录；直接调用 `Session.create()` 与 `Session.fromRestore()` 会拒绝它。该词汇不是访问控制能力：任何持有 `ctx.sessions` 的代码都能写入已激活注册的类型。JSONL 会将读取方注册快照与文件版本一起缓存，因此卸载插件后不会复用曾被接受的日志。
 
 ```ts type-equiv
 /** Immutable reader identity stamped on one required external Session event. */

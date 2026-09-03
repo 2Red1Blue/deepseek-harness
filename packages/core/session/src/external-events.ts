@@ -152,6 +152,9 @@ export class RequiredExternalSessionEventRegistry {
       throw new Error(`required external Session event "${type}" is not registered`)
     }
     validatePayload(definition, data)
+    if (this.writableByType.get(type) !== definition) {
+      throw new Error(`required external Session event "${type}" registration changed during validation`)
+    }
     return definition.ref
   }
 

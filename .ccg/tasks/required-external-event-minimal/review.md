@@ -30,3 +30,18 @@ The guarded dual review `c9cc08dd-e4f2-4272-80be-9208d04e606f` compared `3fc23f4
 - `pnpm run verify-translation-pairing --write docs/subsystems/session.md packages/core/session/README.md packages/session/session-persistence/README.md .agents/notes/implemented/architecture/2026-09-03-required-external-session-events.md`
 
 The final scoped dual review remains pending after the fixes are committed. Repository-wide test, type, and documentation gates are deliberately deferred to merge or release because this change has narrow package ownership.
+
+## Second independent review
+
+The guarded dual review `78670824-71db-4d9f-a605-99a8fa5f962c` compared `9573fd4257` with `origin/master`. Claude approved with one malformed-envelope hardening warning; Codex requested three lifecycle fixes.
+
+| Finding | Disposition |
+| --- | --- |
+| A validator could dispose or replace its writer registration, then the append could still commit. | Fixed: `resolve()` confirms the same registration still owns the type after synchronous validation; a self-releasing-validator test proves no event commits. |
+| A validator could mutate the detached payload after accepting it. | Fixed: the writer freezes the detached payload before validation and commits that same object; hostile-mutation coverage added. |
+| A reader registration could change during JSONL I/O or validation. | Fixed: JSONL captures the vocabulary after I/O, validates through that snapshot, and refuses if it changes during validation before caching; deferred-I/O and self-releasing-reader coverage added. |
+| A required external marker could carry `ignorable: false` or another malformed companion. | Fixed: any present `ignorable` companion is persistence corruption, matching seed restoration; focused coverage added. |
+| Seed marker parse errors lost their cause. | Fixed: the seed error retains its underlying marker-validation cause. |
+| The vocabulary could be mistaken for an access-control capability. | Documented: it is a durable vocabulary guard; code holding `ctx.sessions` can write an active registered type. |
+
+The final scoped dual review is required after this second correction set is committed.

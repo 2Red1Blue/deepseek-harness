@@ -208,6 +208,10 @@ describe('validateStoredEvents', () => {
     expect(() => validateStoredEvents(meta('external-contradictory'), contradictory, undefined, externalValidation))
       .toThrow(SessionPersistenceCorruptionError)
 
+    const malformedIgnorable = [externalEvent({ ignorable: 1 })]
+    expect(() => validateStoredEvents(meta('external-malformed-ignorable'), malformedIgnorable, undefined, externalValidation))
+      .toThrow(SessionPersistenceCorruptionError)
+
     const firstParty = [externalEvent({ type: 'turn/start', data: { turn: 1 } })]
     expect(() => validateStoredEvents(meta('external-first-party'), firstParty, undefined, externalValidation))
       .toThrow(SessionPersistenceCorruptionError)
