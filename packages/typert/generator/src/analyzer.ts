@@ -69,6 +69,12 @@ export interface WorkspaceAnalyzerOptions {
   readonly hostConfig?: string
   /** Client aggregate path, relative to {@link root}; absent files are skipped. */
   readonly clientConfig?: string
+  /**
+   * Additional source containers, absolute or relative to {@link root}.
+   * Only directly referenced projects inside canonical containers are admitted;
+   * the default container is `<root>/packages`. Directories are not scanned.
+   */
+  readonly additionalPackageRoots?: readonly string[]
   /** Optional package-name subset for an incremental generation pass. */
   readonly packages?: readonly string[]
   /** Independently compiled faces to materialize; both are analyzed by default. */
@@ -190,9 +196,9 @@ function defaultLibraryKey(fileName: string, languageVersionOrOptions: ts.Script
 export class WorkspaceCaches {
   /** Parsed tsconfig files by absolute config path. */
   readonly configs = new Map<string, ParsedConfig>()
-  /** Registration inventories keyed by root and aggregate config paths. */
+  /** Registration inventories keyed by canonical root, aggregates, and source containers. */
   readonly registrations = new Map<string, PackageRegistration[]>()
-  private readonly hosts = new Map<TypertFace, FaceProgramHost>()
+  private readonly hosts = new Map<string, FaceProgramHost>()
 
   /**
    * Parse one tsconfig once per workspace snapshot.
@@ -209,16 +215,17 @@ export class WorkspaceCaches {
   }
 
   /**
-   * Return the shared compiler host for one face. Every program of one face
-   * is built from the same aggregate compiler options (the first call wins),
-   * so parsed source files, binder state, and module resolutions are safe to
-   * reuse across the face's batched programs.
+   * Return the shared compiler host for one face and canonical aggregate.
+   * Aggregate options are immutable within this workspace snapshot, so source
+   * files, binder state, and module resolutions can be reused across batches.
    * @param face - the face whose programs share this host.
    * @param options - the face's effective compiler options.
+   * @param aggregatePath - absolute path of the aggregate supplying these options.
    * @returns a compiler host with source-file and module-resolution caches.
    */
-  programHost(face: TypertFace, options: ts.CompilerOptions): ts.CompilerHost {
-    let entry = this.hosts.get(face)
+  programHost(face: TypertFace, options: ts.CompilerOptions, aggregatePath: string): ts.CompilerHost {
+    const key = `${face}\0${realPath(aggregatePath)}`
+    let entry = this.hosts.get(key)
     if (entry === undefined) {
       const host = ts.createCompilerHost(options)
       const files = new Map<string, ts.SourceFile | undefined>()
@@ -244,7 +251,7 @@ export class WorkspaceCaches {
       }
       host.getModuleResolutionCache = () => resolutionCache
       entry = { host, files }
-      this.hosts.set(face, entry)
+      this.hosts.set(key, entry)
     }
     return entry.host
   }
@@ -264,11 +271,14 @@ export class WorkspaceCaches {
   }
 }
 
-/** Analyze host and client as independent TypeScript programs. */
+/**
+ * Analyze host and client as independent TypeScript programs.
+ * Conflicting physical roots for one package name and face fail before selection.
+ */
 export class WorkspaceAnalyzer {
   private readonly options: Required<Pick<
     WorkspaceAnalyzerOptions,
-    'root' | 'hostConfig' | 'clientConfig' | 'faces' | 'checkDiagnostics' | 'mode'
+    'root' | 'hostConfig' | 'clientConfig' | 'additionalPackageRoots' | 'faces' | 'checkDiagnostics' | 'mode'
   >> & Pick<WorkspaceAnalyzerOptions, 'packages'>
   private queuedEdit: SourceEdit | undefined
   private readonly crossFaceLinks = new Map<string, CrossFaceLink>()
@@ -277,10 +287,13 @@ export class WorkspaceAnalyzer {
   private readonly caches: WorkspaceCaches
 
   constructor(options: WorkspaceAnalyzerOptions) {
+    const root = realPath(options.root)
     this.options = {
-      root: realPath(options.root),
-      hostConfig: options.hostConfig ?? 'tsconfig.host.json',
-      clientConfig: options.clientConfig ?? 'tsconfig.client.json',
+      root,
+      hostConfig: realPath(resolve(root, options.hostConfig ?? 'tsconfig.host.json')),
+      clientConfig: realPath(resolve(root, options.clientConfig ?? 'tsconfig.client.json')),
+      additionalPackageRoots: [...new Set((options.additionalPackageRoots ?? [])
+        .map(container => realPath(resolve(root, container))))].sort(),
       faces: options.faces ?? ['host', 'client'],
       checkDiagnostics: options.checkDiagnostics ?? true,
       mode: options.mode ?? 'check',
@@ -320,7 +333,7 @@ export class WorkspaceAnalyzer {
         const program = ts.createProgram({
           rootNames,
           options,
-          host: this.caches.programHost(face, options),
+          host: this.caches.programHost(face, options, aggregatePath),
         })
         faces.push(new FaceAnalyzer({
           root: this.options.root,
@@ -457,18 +470,24 @@ export class WorkspaceAnalyzer {
   }
 
   private loadRegistrations(): PackageRegistration[] {
-    const inventoryKey = `${this.options.root}\0${this.options.hostConfig}\0${this.options.clientConfig}`
+    const inventoryKey = [
+      this.options.root,
+      this.options.hostConfig,
+      this.options.clientConfig,
+      ...this.options.additionalPackageRoots,
+    ].join('\0')
     const cached = this.caches.registrations.get(inventoryKey)
     if (cached !== undefined) return cached
     const registrations: PackageRegistration[] = []
+    const containers = [realPath(join(this.options.root, 'packages')), ...this.options.additionalPackageRoots]
     for (const face of ['host', 'client'] as const) {
       const aggregatePath = resolve(this.options.root, face === 'host' ? this.options.hostConfig : this.options.clientConfig)
       if (!existsSync(aggregatePath)) continue
       const aggregate = this.caches.config(aggregatePath)
       for (const reference of aggregate.parsed.projectReferences ?? []) {
-        const configPath = projectConfigPath(reference.path)
-        const packageRoot = dirname(configPath)
-        if (!isWithin(realPath(packageRoot), join(this.options.root, 'packages'))) continue
+        const configPath = realPath(projectConfigPath(reference.path))
+        const packageRoot = realPath(dirname(configPath))
+        if (!containers.some(container => isWithin(packageRoot, container))) continue
         const manifestPath = join(packageRoot, 'package.json')
         if (!existsSync(manifestPath)) continue
         const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
@@ -476,7 +495,7 @@ export class WorkspaceAnalyzer {
         const registration: PackageRegistration = {
           face,
           name: manifest.name,
-          root: realPath(packageRoot),
+          root: packageRoot,
           config: this.caches.config(configPath),
           manifest,
         }
@@ -497,6 +516,18 @@ export class WorkspaceAnalyzer {
         }
       }
     }
+    const identities = new Map<string, { face: TypertFace; name: string; roots: Set<string> }>()
+    for (const { face, name, root } of registrations) {
+      const key = `${face}\0${name}`
+      const identity = identities.get(key) ?? { face, name, roots: new Set<string>() }
+      identity.roots.add(root)
+      identities.set(key, identity)
+    }
+    const conflicts = [...identities].sort(([left], [right]) => left.localeCompare(right))
+      .flatMap(([, { face, name, roots }]) => roots.size > 1
+        ? [`typert(${face}): package ${name} has conflicting roots: ${JSON.stringify([...roots].sort())}`]
+        : [])
+    if (conflicts.length > 0) throw new TypertAnalysisError(conflicts.join('\n'))
     const inventory = uniqueBy(registrations, registration => `${registration.face}\0${registration.name}`)
       .sort((left, right) =>
         left.face.localeCompare(right.face) || left.name.localeCompare(right.name))
@@ -546,18 +577,22 @@ export class WorkspaceAnalyzer {
   private checkProject(registration: PackageRegistration): void {
     if (this.checkedProjects.has(registration.config.path)) return
     this.checkedProjects.add(registration.config.path)
+    const options: ts.CompilerOptions = {
+      ...registration.config.parsed.options,
+      composite: false,
+      incremental: false,
+      noEmit: true,
+      rootDir: this.options.root,
+    }
+    if (this.options.additionalPackageRoots.length > 0) {
+      // TypeScript also derives rootDir from configFilePath. Diagnostic programs
+      // emit nothing and must infer a common directory including sibling sources.
+      delete options.rootDir
+      delete options.configFilePath
+    }
     const program = ts.createProgram({
       rootNames: registration.config.parsed.fileNames,
-      options: {
-        ...registration.config.parsed.options,
-        composite: false,
-        incremental: false,
-        noEmit: true,
-        // Source-plane workspace aliases resolve referenced packages to source.
-        // Widen only this diagnostic program's root so those imports do not
-        // produce an artificial TS6059 before Typert checks the public edge.
-        rootDir: this.options.root,
-      },
+      options,
     })
     const diagnostics = [
       ...program.getSyntacticDiagnostics(),

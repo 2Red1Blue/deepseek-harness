@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { TypertAnalysisError, WorkspaceAnalyzer, WorkspaceCaches } from './analyzer.ts'
-import type { DiscoveredTypertPackage } from './analyzer.ts'
+import type { DiscoveredTypertPackage, WorkspaceAnalyzerOptions } from './analyzer.ts'
 import { FaceModelEmitter } from './emitter.ts'
 import type { ModelEmitResult } from './emitter.ts'
 import type { TypertFace } from './model.ts'
@@ -17,7 +17,10 @@ export interface WorkspaceEmitResult extends ModelEmitResult {
 }
 
 /** Behavior switches for one {@link WorkspaceTypertGenerator}. */
-export interface WorkspaceTypertGeneratorOptions {
+export interface WorkspaceTypertGeneratorOptions extends Pick<
+  WorkspaceAnalyzerOptions,
+  'hostConfig' | 'clientConfig' | 'additionalPackageRoots'
+> {
   /**
    * Run the per-package syntactic/semantic diagnostic pass before analysis
    * (default true). Pass false only when the same orchestration already
@@ -51,6 +54,7 @@ export class WorkspaceTypertGenerator {
    */
   discover(faces?: readonly TypertFace[]): DiscoveredTypertPackage[] {
     return new WorkspaceAnalyzer({
+      ...this.options,
       root: this.root,
       caches: this.caches,
       ...(faces === undefined ? {} : { faces }),
@@ -66,11 +70,11 @@ export class WorkspaceTypertGenerator {
   generate(packages?: readonly string[], faces?: readonly TypertFace[]): WorkspaceEmitResult[] {
     const selected = packages ?? this.discover(faces).map(candidate => candidate.package)
     const workspace = new WorkspaceAnalyzer({
+      ...this.options,
       root: this.root,
       packages: selected,
       caches: this.caches,
       ...(faces === undefined ? {} : { faces }),
-      ...(this.options.checkDiagnostics === undefined ? {} : { checkDiagnostics: this.options.checkDiagnostics }),
     }).analyze()
     const artifacts: WorkspaceEmitResult[] = []
     for (const face of workspace.faces) {

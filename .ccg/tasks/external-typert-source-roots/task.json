@@ -1,0 +1,12 @@
+{
+  "id": "external-typert-source-roots",
+  "title": "Allow explicit sibling source packages in Typert generation for the WSL plugin deployment",
+  "status": "in_progress",
+  "complexity": "M",
+  "risk": "medium",
+  "domain": "build",
+  "currentPhase": "review",
+  "nextAction": "Both models approved implementation and 50 focused tests pass; finish checks, GitHub sync and actual paired WSL product generation before closing",
+  "createdAt": "2026-09-04T05:16:15Z",
+  "branch": "codex/required-external-event-minimal"
+}

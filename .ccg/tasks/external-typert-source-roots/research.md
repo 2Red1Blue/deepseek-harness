@@ -1,0 +1,7 @@
+# Build-tool reference evidence
+
+The official [TypeDoc input documentation](https://typedoc.org/documents/Options.Input.html) describes explicit entry points, package-based conversion and tsconfig-aware mapping of package exports to TypeScript source. This is an upstream documentation reference, not a locally verified checkout. Adopt explicit package/config ownership as a design comparison; do not import TypeDoc, its documentation model or its package-merge runtime into Typert. Typert's existing compiler-independent graph and strict emitter remain authoritative.
+
+The local candidate's `WorkspaceAnalyzer.loadRegistrations()` uses direct aggregate references, filters physical packages under the workspace's packages container, and deduplicates by face/name. `isTypeMetaSymbol()` recognizes the registered protocol owner; admitting a sibling source container therefore removes a build-layout limitation without relying on decorator spelling alone. `WorkspaceTypertGenerator` owns artifact export checks; selected-package emission and source analysis remain separate.
+
+The existing compiler-independent Typert Agent Note retains its purpose and is not superseded: independent faces, public exports, lossless graphs and strict schema failure still apply. The scoped extension adds source-container configuration, so its documentation can update that existing owner without creating a duplicate decision record or archiving unrelated notes.

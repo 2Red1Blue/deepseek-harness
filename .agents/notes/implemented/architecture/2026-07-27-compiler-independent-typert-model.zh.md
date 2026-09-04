@@ -18,6 +18,8 @@ TypeGraph 保存开发者写下的计算前类型结构，包括泛型参数与�
 
 每个 face 独立拥有 PackageModel 和 TypeGraph。`tsconfig.host.json` 与 `tsconfig.client.json` 的直接 project references 决定 package 的 face 归属，`package.json#exports` 决定公开边界。跨 face 关系只来自源码中的显式 import 或 re-export，并作为独立 link 保留；外部 npm 类型记录为 External，不读取或复制其声明。
 
+源码成员默认限于工作区 `packages` 容器内的项目。显式 `additionalPackageRoots` 通过同一份直接引用清单接纳同级源码容器，并执行规范化路径包含检查及全局包名／face 冲突拒绝。自定义 aggregate 路径具有独立的编译器宿主缓存标识；不可变的注册清单缓存还区分源码容器。这让独立源码插件无需扫描任意依赖、仅按拼写识别协议标注，或用复制产物替代严格生成。
+
 PackageModel 识别 Cordis service、event、`@typert object` 引用对象和 `@typert schema` 数据根。service 与 object 只暴露 public instance member，排除 constructor、static、private 和 protected；继承边保留在 TypeGraph 中，不复制为扁平成员。缺少 public property、parameter 或 return 类型标注时，`check` 模式报错，`write` 模式写入 checker 推断结果后重建 project 并再次以严格模式分析。
 
 [`dsh-typert-registry`](../../../../packages/typert/registry/README.zh.md) 提供 `ctx.typert`，且只负责运行时注册：一个 contribution 原子携带 package-face reflection 与可选 Zod schema，并随 Cordis effect 撤销。注册表不分析 TypeScript，也不合并两个 face。JSON Schema 是对已注册 Zod schema 的按需投影。
@@ -45,6 +47,8 @@ Zod emitter 对支持的节点和各类 literal 逐类执行成功与失败 pars
 **合并 host/client project 或复制 host 类型。** 合并会污染 Cordis declaration merging；复制会产生第二份类型事实源。独立 face 加显式 cross-face link 保留了 project 隔离与真实引用关系。
 
 **让 `dsh-typert-registry` 承担类型解析和跨包合成。** 这会把 TypeScript compiler、Cordis 生命周期和具体 schema 策略重新耦合。注册表保持为生成 artifact 的生命周期容器，复杂分析留在构建期模型。
+
+**把框架生成的产物复制进独立插件。** 重命名包标识并追加手写描述符，无法校验插件当前的方法或请求 schema。显式源码容器保留从源码生成产物的机制，同时不改变运行时注册与包发布。
 
 ## Consequences
 

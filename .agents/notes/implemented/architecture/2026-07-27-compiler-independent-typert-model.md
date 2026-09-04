@@ -18,6 +18,8 @@ TypeGraph preserves the developer-authored, pre-evaluation type structure, inclu
 
 Each face independently owns a PackageModel and TypeGraph. Direct project references from `tsconfig.host.json` and `tsconfig.client.json` determine a package's face membership, while `package.json#exports` defines its public boundary. Cross-face relationships come only from explicit imports or re-exports in source and remain separate links; external npm types are recorded as External without reading or copying their declarations.
 
+Source membership defaults to projects inside the workspace's `packages` container. Explicit `additionalPackageRoots` admit sibling source containers through the same direct-reference inventory, with canonical-path containment and global package-name/face conflict rejection. Custom aggregate paths carry their own compiler-host cache identity; the immutable inventory cache also distinguishes source containers. This supports independent source plugins without scanning arbitrary dependencies, recognizing protocol annotations by spelling alone, or replacing strict generation with copied artifacts.
+
 PackageModel recognizes Cordis services, events, `@typert object` reference objects, and `@typert schema` data roots. Services and objects expose only public instance members, excluding constructors and static, private, and protected members; inheritance edges remain in TypeGraph instead of being copied into flattened members. When a public property, parameter, or return type lacks an annotation, `check` mode reports an error, while `write` mode writes the checker-inferred result, rebuilds the project, and analyzes it again in strict mode.
 
 [`dsh-typert-registry`](../../../../packages/typert/registry/README.md) provides `ctx.typert` and handles runtime registration only: one contribution atomically carries package-face reflection and an optional Zod schema, and Cordis effect disposal revokes it. The registry neither analyzes TypeScript nor merges the two faces. JSON Schema is an on-demand projection of registered Zod schemas.
@@ -45,6 +47,8 @@ For each supported node kind and literal category, Zod emitter tests run both su
 **Merge the host/client projects or duplicate host types.** Merging would contaminate Cordis declaration merging; duplication would create a second source of truth for types. Independent faces with explicit cross-face links preserve project isolation and actual reference relationships.
 
 **Make `dsh-typert-registry` responsible for type resolution and cross-package composition.** That would recouple the TypeScript compiler, Cordis lifecycle, and a specific schema policy. The registry remains a lifecycle container for generated artifacts, while the build-time model retains complex analysis.
+
+**Copy framework-generated artifacts into independent plugins.** Renaming package identifiers and appending handwritten descriptors cannot verify the plugin's current methods or request schemas. Explicit source containers preserve source-derived generation while leaving runtime registration and package publication unchanged.
 
 ## Consequences
 

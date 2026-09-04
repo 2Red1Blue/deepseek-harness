@@ -47,6 +47,12 @@ files:
 
 静态消费方直接以工作区的 `tsconfig.host.json` 与 `tsconfig.client.json` aggregate 调用 `WorkspaceAnalyzer`，选择 face 与包子集，并在不生成或加载运行时产物的前提下读取生成的 `FaceModel` 与类型图。`analyzeInBatches()` 通过有界的编译器程序处理大批量包选择，模型形态保持一致；`discoverPackages()` 无需构建类型检查程序即可找出参与贡献的包。
 
+独立源码工作区可以向分析器或 `WorkspaceTypertGenerator` 传入 `hostConfig`、`clientConfig` 与 `additionalPackageRoots`。额外根目录是源码容器目录，可以相对于工作区根目录解析，也可以使用绝对路径。只有直接项目引用中位于默认 `packages` 目录或显式允许的规范化容器内的项目才会被注册；符号链接不会让容器外的项目进入注册表。aggregate 编译选项必须解析到预期的源码别名，调用方负责选择要生成产物的包。同一包名与编译器 face 对应不同物理根目录时，分析会失败，聚焦生成也不例外。
+
+`WorkspaceCaches` 属于一份不可变的源码与配置快照。注册清单按工作区、aggregate 路径及额外根目录区分；编译器宿主按 face 与 aggregate 路径区分。直接调用 `programHost(face, options, aggregatePath)` 时必须用第三个参数提供规范化 aggregate 标识；此预发布 API 不再支持原有的双参数调用。修改输入或新建临时 aggregate 的调用方使用新的生成器与缓存，而不跨构建保留缓存。源码工作区支持不意味着可以展开仅安装了声明文件的依赖。
+
+显式配置额外源码容器时，仅用于诊断的程序推导共同源码目录，包括主工作区内的包所导入的依赖。包的产物生成设置不变；语法、语义及 Remote schema 检查保持启用。未配置额外容器时，诊断根目录处理不变。
+
 ### 在 tsdown 构建中运行生成
 
 包的 `./tsdown` 子路径为根 tsdown 配置提供 `typertPlugin()`：它在打包前降低 TypeScript 依赖中的标准装饰器，并在包输出根目录生成模型驱动的 face 产物。`package` 模式只生成当前打包的包；`workspace` 模式对每个显式贡献方各生成一次。
