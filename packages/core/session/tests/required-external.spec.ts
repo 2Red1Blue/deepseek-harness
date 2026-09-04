@@ -248,11 +248,11 @@ describe('SessionStore required external events', () => {
 
   it('allows an external seed only through SessionStore persistence preparation with an active registration', async () => {
     const id = SessionId('external-restored')
-    const externalSeed = (): SessionEvent[] => [{
+    const externalSeed = (runId = 'run-1'): SessionEvent[] => [{
       type: 'roundtable-director/run',
       seq: 0,
       time: 1,
-      data: { runId: 'run-1' },
+      data: { runId },
       requiredExternal: { namespace: 'roundtable-director', version: 1 },
     } as unknown as SessionEvent]
     const header = () => ({ version: SESSION_FORMAT_VERSION, id, createdAt: 1, isSeeded: false })
@@ -264,7 +264,7 @@ describe('SessionStore required external events', () => {
     const ctx = await setup()
     const dispose = ctx.sessions.registerRequiredExternalEvents(registration)
     expect(() => ctx.sessions.prepare(id, {
-      seed: [{ ...externalSeed()[0]!, data: { runId: 'wrong' } }],
+      seed: externalSeed('wrong'),
       meta: header(),
       inheritedEventCount: SessionLogOffset(0),
       seedSource: 'persistence',

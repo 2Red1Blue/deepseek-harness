@@ -77,3 +77,11 @@ No production implementation changed after this approving review; the remaining 
 - `git diff --check` — passed.
 
 Repository-wide test, type, and documentation gates remain intentionally deferred to merge or release. The next implementation step is Roundtable integration and a real cold-load probe, not another core-only test pass.
+
+## WSL synchronization prerequisite
+
+The 2026-09-04 first push to the approved personal fork was blocked by the Host typecheck: the malformed external seed spread was contextually checked against the full `SessionEvent` union, requiring a branded `WorkflowRunId`. The fixture now accepts its payload id as a factory argument, retaining the same external-event cast and validator-rejection assertion. No production implementation changed.
+
+The focused `required-external.spec.ts` run passed all 12 tests in 3.58 seconds. Guarded dual review `f08fbd29-e8bc-4f93-84d6-6b10c308d67a` returned APPROVE from both Codex and Claude with no Critical or Warning findings. The inferred string parameter remains sufficient; the optional explicit annotation was not adopted. The claimed object-key-order difference is not relevant evidence: overwriting an existing spread property does not move its position.
+
+`pnpm run doc-sync` passed before this test-only correction. The ordinary push hook must pass before the revised branch is considered synchronized; the previous failed push did not publish it. WSL Web deployment remains separate from these fixture checks.
