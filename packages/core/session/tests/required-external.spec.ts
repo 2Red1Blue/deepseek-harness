@@ -207,6 +207,12 @@ describe('SessionStore required external events', () => {
     expect(() => ctx.sessions.registerRequiredExternalEvents(invalidNamespace))
       .toThrow('namespace must be a string')
 
+    for (const entry of [null, undefined]) {
+      const malformed: unknown = { ...registration, events: [entry] }
+      expect(() => ctx.sessions.registerRequiredExternalEvents(malformed as RequiredExternalSessionEventRegistration))
+        .toThrow('required external Session event type must begin with "roundtable-director/"')
+    }
+
     const first = ctx.sessions.registerRequiredExternalEvents(registration)
     expect(() => ctx.sessions.registerRequiredExternalEvents(registration)).toThrow('already registered')
     first()
@@ -214,7 +220,7 @@ describe('SessionStore required external events', () => {
     const replacement = ctx.sessions.registerRequiredExternalEvents(registration)
     replacement()
 
-    const asynchronous: RequiredExternalSessionEventRegistration = {
+    const asynchronous: unknown = {
       namespace: 'roundtable-async',
       version: 1,
       events: [{
@@ -224,7 +230,8 @@ describe('SessionStore required external events', () => {
         },
       }],
     }
-    const asyncDispose = ctx.sessions.registerRequiredExternalEvents(asynchronous)
+    // Deliberately cross the typed boundary with an invalid asynchronous validator.
+    const asyncDispose = ctx.sessions.registerRequiredExternalEvents(asynchronous as RequiredExternalSessionEventRegistration)
     const session = ctx.sessions.create(SessionId('external-async-validator'))
     expect(() => ctx.sessions.appendRequiredExternalEvent(session, 'roundtable-async/run', { runId: 'run-1' }))
       .toThrow('must complete synchronously')
@@ -232,7 +239,7 @@ describe('SessionStore required external events', () => {
       { namespace: 'roundtable-async', version: 1 },
       'roundtable-async/run',
       { runId: 'run-1' },
-    )).toMatchObject({ kind: 'invalid', reason: expect.stringContaining('must complete synchronously') })
+    )).toEqual({ kind: 'invalid', reason: 'required external Session event "roundtable-async/run" validator must complete synchronously' })
     asyncDispose()
   })
 

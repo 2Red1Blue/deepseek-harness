@@ -15,7 +15,7 @@ import type {
 interface RegisteredEventDefinition {
   readonly ref: RequiredExternalSessionEventRef
   readonly type: string
-  readonly validate: (data: unknown) => void
+  readonly validate: (data: unknown) => unknown
 }
 
 /** Return a stable key for one persisted external event identity. */
@@ -104,7 +104,7 @@ export class RequiredExternalSessionEventRegistry {
     const definitions: RegisteredEventDefinition[] = []
     const seen = new Set<string>()
     for (const candidate of registration.events) {
-      const definition = candidate as RequiredExternalSessionEventDefinition
+      const definition = candidate as RequiredExternalSessionEventDefinition | null | undefined
       if (typeof definition?.type !== 'string' || !definition.type.startsWith(`${ref.namespace}/`)) {
         throw new TypeError(`required external Session event type must begin with "${ref.namespace}/"`)
       }

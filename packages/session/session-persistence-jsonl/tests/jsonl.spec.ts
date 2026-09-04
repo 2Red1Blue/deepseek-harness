@@ -447,7 +447,7 @@ describe('JsonlSessionPersistence: required external events', () => {
     const event = writer.sessions.appendRequiredExternalEvent(session, 'roundtable-director/run', { runId: 'run-1' })
     await writeLog(writer.sessionPersistence, session.header, [event])
     expect(await readFile(rawLogPath(externalRoot, '/work', session.id), 'utf8')).toContain('requiredExternal')
-    writerRegistration()
+    await writerRegistration()
     await writer.fiber.dispose()
 
     const missing = new Context()
@@ -480,7 +480,7 @@ describe('JsonlSessionPersistence: required external events', () => {
     })
     const interruptedRead = readAll(reader.sessionPersistence, session.id)
     await readStarted.promise
-    readerRegistration()
+    await readerRegistration()
     readGate.resolve(undefined)
     await expect(interruptedRead).rejects.toThrow('no matching registration')
 
@@ -494,7 +494,7 @@ describe('JsonlSessionPersistence: required external events', () => {
       requiredExternal: { namespace: 'roundtable-director', version: 1 },
     }])
 
-    activeRegistration()
+    await activeRegistration()
     const removedResult = await readAll(reader.sessionPersistence, session.id).then(
       () => 'opened',
       (error: unknown) => error instanceof Error ? error.name : String(error),
@@ -510,7 +510,7 @@ describe('JsonlSessionPersistence: required external events', () => {
           if (typeof data !== 'object' || data === null || (data as Record<string, unknown>)['runId'] !== 'run-1') {
             throw new Error('run event requires runId "run-1"')
           }
-          releaseDuringValidation()
+          void releaseDuringValidation()
         },
       }],
     }), 'test required external reader vocabulary self-releasing')
@@ -527,7 +527,7 @@ describe('JsonlSessionPersistence: required external events', () => {
       type: 'roundtable-director/run',
       requiredExternal: { namespace: 'roundtable-director', version: 1 },
     }])
-    reactivatedRegistration()
+    await reactivatedRegistration()
     await reader.fiber.dispose()
   })
 })
