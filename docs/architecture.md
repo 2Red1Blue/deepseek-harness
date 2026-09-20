@@ -132,7 +132,9 @@ A **seam** is a swappable capability with three roles: a **Service Definition** 
 
 Seams are why one provider swap changes the whole product. Filesystem and subprocess providers share one execution world, so pointing them at a remote sandbox moves Bash, PTY, and LSP with them, with no provider forks. [Subagent providers](subsystems/subagent.md) vary just as widely behind one interface, from a fresh child agent to a delegated turn in another product.
 
-[Experimental Agent Teams](subsystems/agent-team.md) is a published opt-in coordination seam on `ctx.agentTeams`, with a durable roster, task board, and mailbox layered over continuable subagents.
+[Experimental Agent Teams](subsystems/agent-team.md) adds an opt-in durable roster, task board, and mailbox over continuable subagents.
+
+[External controllers](../.agents/notes/implemented/architecture/2026-09-20-external-controller-ownership.md) own outcomes; DSH owns execution facts.
 
 ## Where new behavior goes
 
