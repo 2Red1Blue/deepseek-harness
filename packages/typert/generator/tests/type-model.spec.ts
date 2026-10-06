@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
@@ -1113,6 +1113,53 @@ describe('WorkspaceAnalyzer', { timeout: 60_000 }, () => {
       { face: 'client', name: 'ClientOnlyMarker' },
       { face: 'host', name: 'HostOnlyMarker' },
     ])
+  })
+
+  it('recognizes package exports when a workspace source import resolves through a symlink', () => {
+    const root = copyFixture('typert-symlink-export-')
+    const protocolRoot = join(root, 'packages/protocol')
+    mkdirSync(join(protocolRoot, 'src'), { recursive: true })
+    writeFileSync(join(protocolRoot, 'package.json'), JSON.stringify({
+      name: '@fixture/protocol',
+      type: 'module',
+      types: 'lib/types/index.d.ts',
+      exports: { '.': { types: './lib/types/index.d.ts', default: './lib/index.js' } },
+    }, null, 2) + '\n')
+    writeFileSync(join(protocolRoot, 'tsconfig.json'), JSON.stringify({
+      extends: '../../tsconfig.base.json',
+      compilerOptions: { rootDir: 'src', outDir: 'lib/types' },
+      include: ['src'],
+    }, null, 2) + '\n')
+    writeFileSync(join(protocolRoot, 'src/index.ts'), [
+      "import { Service } from '@deepseek-ai/cordis'",
+      'export abstract class TypertRemoteService extends Service {}',
+      '',
+    ].join('\n'))
+    symlinkSync(protocolRoot, join(root, 'linked-protocol'), process.platform === 'win32' ? 'junction' : 'dir')
+
+    const baseConfigPath = join(root, 'tsconfig.base.json')
+    const baseConfig = JSON.parse(readFileSync(baseConfigPath, 'utf8')) as {
+      compilerOptions: { paths: Record<string, string[]>; preserveSymlinks?: boolean }
+    }
+    baseConfig.compilerOptions.paths['@fixture/protocol'] = ['./linked-protocol/src/index.ts']
+    // Preserve distinct import and registration paths for the same source file.
+    baseConfig.compilerOptions.preserveSymlinks = true
+    writeFileSync(baseConfigPath, `${JSON.stringify(baseConfig, null, 2)}\n`)
+
+    const hostSource = join(root, 'packages/host/src/index.ts')
+    writeFileSync(hostSource, [
+      "import { TypertRemoteService } from '@fixture/protocol'",
+      'export class RoundtableDirector extends TypertRemoteService { current(): boolean { return true } }',
+      "declare module '@deepseek-ai/cordis' { interface Context { roundtable: RoundtableDirector } }",
+      '',
+    ].join('\n'))
+    const aggregatePath = join(root, 'tsconfig.host.json')
+    const aggregate = JSON.parse(readFileSync(aggregatePath, 'utf8')) as { references: { path: string }[] }
+    aggregate.references.push({ path: './packages/protocol' })
+    writeFileSync(aggregatePath, `${JSON.stringify(aggregate, null, 2)}\n`)
+
+    const model = new WorkspaceAnalyzer({ root, faces: ['host'] }).analyze()
+    expect(model.faces[0]?.packages.map(item => item.name)).toContain('@fixture/host')
   })
 
   it('accepts package export forms while skipping artifact-only rows and unexported packages', { timeout: 180_000 }, () => {

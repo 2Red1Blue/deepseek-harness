@@ -2634,7 +2634,11 @@ class FaceAnalyzer {
     const sourceFile = this.sourceFiles.get(realPath(sourcePathForExport(registration.root, target))) as ts.SourceFile
     const moduleSymbol = this.checker.getSymbolAtLocation(sourceFile) as ts.Symbol
     const exported = this.checker.getExportsOfModule(moduleSymbol)
-      .find(candidate => candidate.name === requestedName && this.resolveSymbol(candidate) === symbol)
+      .find((candidate) => {
+        if (candidate.name !== requestedName) return false
+        const exportedSymbol = this.resolveSymbol(candidate)
+        return exportedSymbol === symbol || sameSourceDeclarations(exportedSymbol, symbol)
+      })
     return exported?.name
   }
 
@@ -2886,6 +2890,21 @@ function preferredDeclaration(symbol: ts.Symbol): ts.Declaration | undefined {
   return symbol.declarations?.find(isTypeDeclaration)
     ?? symbol.valueDeclaration
     ?? symbol.declarations?.[0]
+}
+
+function sameSourceDeclarations(left: ts.Symbol, right: ts.Symbol): boolean {
+  // Project references and path aliases can load one source under separate symlink paths.
+  const identity = (declaration: ts.Declaration): string => [
+    realPath(declaration.getSourceFile().fileName),
+    declaration.kind,
+    declaration.pos,
+    declaration.end,
+  ].join('\0')
+  const leftDeclarations = (left.declarations ?? []).map(identity).sort()
+  const rightDeclarations = (right.declarations ?? []).map(identity).sort()
+  return leftDeclarations.length > 0
+    && leftDeclarations.length === rightDeclarations.length
+    && leftDeclarations.every((declaration, index) => declaration === rightDeclarations[index])
 }
 
 function optionalParent(node: ts.Node): ts.Node | undefined {
