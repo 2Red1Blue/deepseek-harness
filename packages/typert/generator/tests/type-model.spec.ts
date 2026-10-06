@@ -1117,7 +1117,7 @@ describe('WorkspaceAnalyzer', { timeout: 60_000 }, () => {
 
   it('recognizes package exports when a workspace source import resolves through a symlink', () => {
     const root = copyFixture('typert-symlink-export-')
-    const protocolRoot = join(root, 'packages/protocol')
+    const protocolRoot = join(root, 'packages', 'protocol')
     mkdirSync(join(protocolRoot, 'src'), { recursive: true })
     writeFileSync(join(protocolRoot, 'package.json'), JSON.stringify({
       name: '@fixture/protocol',
@@ -1155,7 +1155,7 @@ describe('WorkspaceAnalyzer', { timeout: 60_000 }, () => {
     ].join('\n'))
     const aggregatePath = join(root, 'tsconfig.host.json')
     const aggregate = JSON.parse(readFileSync(aggregatePath, 'utf8')) as { references: { path: string }[] }
-    aggregate.references.push({ path: './packages/protocol' })
+    aggregate.references.push({ path: join('.', 'packages', 'protocol') })
     writeFileSync(aggregatePath, `${JSON.stringify(aggregate, null, 2)}\n`)
 
     const model = new WorkspaceAnalyzer({ root, faces: ['host'] }).analyze()
