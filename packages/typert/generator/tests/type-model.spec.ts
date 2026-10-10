@@ -1162,6 +1162,197 @@ describe('WorkspaceAnalyzer', { timeout: 60_000 }, () => {
     expect(model.faces[0]?.packages.map(item => item.name)).toContain('@fixture/host')
   })
 
+  it('models Remote wire types imported through a symlink as their public package imports', () => {
+    const root = mkdtempSync(join(import.meta.dirname, '.typert-symlink-remote-'))
+    temporaryRoots.push(root)
+    cpSync(resolve(import.meta.dirname, 'fixtures/remote-model'), root, { recursive: true })
+    const remoteRoot = join(root, 'packages/remote')
+    symlinkSync(remoteRoot, join(root, 'linked-remote'), process.platform === 'win32' ? 'junction' : 'dir')
+
+    const baseConfigPath = join(root, 'tsconfig.base.json')
+    const baseConfig = JSON.parse(readFileSync(baseConfigPath, 'utf8')) as {
+      compilerOptions: { paths: Record<string, string[]>; preserveSymlinks?: boolean }
+    }
+    baseConfig.compilerOptions.paths['@fixture/remote/types'] = ['./linked-remote/src/types.ts']
+    baseConfig.compilerOptions.preserveSymlinks = true
+    writeFileSync(baseConfigPath, `${JSON.stringify(baseConfig, null, 2)}\n`)
+
+    const remoteSourcePath = join(remoteRoot, 'src/index.ts')
+    const remoteSource = readFileSync(remoteSourcePath, 'utf8')
+      .replaceAll("from './types.ts'", "from '@fixture/remote/types'")
+    writeFileSync(remoteSourcePath, remoteSource)
+
+    const model = new WorkspaceAnalyzer({ root, faces: ['host'] }).analyze()
+    expect(model.faces[0]?.packages.find(item => item.name === '@fixture/remote')?.invocations[0])
+      .toMatchObject({
+        parameters: [{
+          name: 'agent',
+          source: 'lookup',
+        }, {
+          name: 'request',
+          boundary: { typeSymbol: '@fixture/remote/types#CreateGoalRequest' },
+        }],
+        result: { typeSymbol: '@fixture/remote/types#CreateGoalResult' },
+      })
+  })
+
+  it('does not map a symlinked Remote type when its dependency resolves to a different wire type', () => {
+    const root = mkdtempSync(join(import.meta.dirname, '.typert-symlink-remote-dependency-'))
+    temporaryRoots.push(root)
+    cpSync(resolve(import.meta.dirname, 'fixtures/remote-model'), root, { recursive: true })
+    const remoteRoot = join(root, 'packages/remote')
+    const linkedRoot = join(root, 'linked-remote')
+    const linkedSource = join(linkedRoot, 'src/types.ts')
+    mkdirSync(join(linkedRoot, 'src'), { recursive: true })
+    symlinkSync(join(remoteRoot, 'src/types.ts'), linkedSource, process.platform === 'win32' ? 'file' : undefined)
+
+    const installWireDependency = (packageRoot: string, version: string, property: string): void => {
+      const dependencyRoot = join(packageRoot, 'node_modules/@fixture/wire-part')
+      mkdirSync(dependencyRoot, { recursive: true })
+      writeFileSync(join(dependencyRoot, 'package.json'), JSON.stringify({
+        name: '@fixture/wire-part',
+        version,
+        types: 'index.d.ts',
+      }, null, 2) + '\n')
+      writeFileSync(join(dependencyRoot, 'index.d.ts'), `export interface WirePart { readonly ${property}: string }\n`)
+    }
+    installWireDependency(remoteRoot, '1.0.0', 'direct')
+    installWireDependency(linkedRoot, '2.0.0', 'linked')
+
+    const typesPath = join(remoteRoot, 'src/types.ts')
+    writeFileSync(typesPath, [
+      "import type { WirePart } from '@fixture/wire-part'",
+      'export interface CreateGoalRequest { readonly title: string; readonly payload: WirePart }',
+      'export interface CreateGoalResult { readonly ref: string }',
+      'export interface RenameGoalRequest { readonly ref: string; readonly title: string }',
+      'export interface RenameGoalResult { readonly renamed: boolean }',
+      '',
+    ].join('\n'))
+
+    const baseConfigPath = join(root, 'tsconfig.base.json')
+    const baseConfig = JSON.parse(readFileSync(baseConfigPath, 'utf8')) as {
+      compilerOptions: { paths: Record<string, string[]>; preserveSymlinks?: boolean }
+    }
+    baseConfig.compilerOptions.paths['@fixture/remote/types'] = ['./linked-remote/src/types.ts']
+    baseConfig.compilerOptions.preserveSymlinks = true
+    writeFileSync(baseConfigPath, `${JSON.stringify(baseConfig, null, 2)}\n`)
+    const remoteSourcePath = join(remoteRoot, 'src/index.ts')
+    const remoteSource = readFileSync(remoteSourcePath, 'utf8')
+      .replaceAll("from './types.ts'", "from '@fixture/remote/types'")
+    writeFileSync(remoteSourcePath, remoteSource)
+
+    const program = ts.createProgram([typesPath, linkedSource], {
+      target: ts.ScriptTarget.ES2024,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      strict: true,
+      preserveSymlinks: true,
+    })
+    const checker = program.getTypeChecker()
+    const propertiesFor = (file: string): string[] => {
+      const source = program.getSourceFile(file)
+      if (source === undefined) throw new Error(`missing source file ${file}`)
+      const request = source.statements.find(statement =>
+        ts.isInterfaceDeclaration(statement) && statement.name.text === 'CreateGoalRequest')
+      if (request === undefined || !ts.isInterfaceDeclaration(request)) throw new Error('missing CreateGoalRequest')
+      const payload = request.members.find(member =>
+        ts.isPropertySignature(member) && ts.isIdentifier(member.name) && member.name.text === 'payload')
+      if (payload === undefined || !ts.isPropertySignature(payload) || payload.type === undefined) throw new Error('missing payload type')
+      return checker.getPropertiesOfType(checker.getTypeAtLocation(payload.type)).map(property => property.name)
+    }
+    expect(propertiesFor(typesPath)).toEqual(['direct'])
+    expect(propertiesFor(linkedSource)).toEqual(['linked'])
+
+    expect(() => new WorkspaceAnalyzer({ root, faces: ['host'] }).analyze())
+      .toThrow('Remote boundary type CreateGoalRequest resolves to a different type through its public package import')
+  })
+
+  it('rejects a cross-face export whose symlinked declaration resolves a different dependency type', () => {
+    const root = copyFixture('typert-symlink-cross-face-dependency-')
+    const hostRoot = join(root, 'packages/host')
+    const linkedRoot = join(root, 'linked-host')
+    const linkedModels = join(linkedRoot, 'src/wire-model.ts')
+    mkdirSync(join(linkedRoot, 'src'), { recursive: true })
+    symlinkSync(join(hostRoot, 'src/index.ts'), join(linkedRoot, 'src/index.ts'), process.platform === 'win32' ? 'file' : undefined)
+    symlinkSync(join(hostRoot, 'src/models.ts'), join(linkedRoot, 'src/models.ts'), process.platform === 'win32' ? 'file' : undefined)
+    symlinkSync(join(hostRoot, 'src/wire-model.ts'), linkedModels, process.platform === 'win32' ? 'file' : undefined)
+
+    const installWireDependency = (packageRoot: string, version: string, type: string): void => {
+      const dependencyRoot = join(packageRoot, 'node_modules/@fixture/wire-part')
+      mkdirSync(dependencyRoot, { recursive: true })
+      writeFileSync(join(dependencyRoot, 'package.json'), JSON.stringify({
+        name: '@fixture/wire-part',
+        version,
+        types: 'index.d.ts',
+      }, null, 2) + '\n')
+      writeFileSync(join(dependencyRoot, 'index.d.ts'), `export type WirePart = ${type}\n`)
+    }
+    installWireDependency(hostRoot, '1.0.0', 'any')
+    installWireDependency(linkedRoot, '2.0.0', 'unknown')
+
+    const modelsPath = join(hostRoot, 'src/models.ts')
+    writeFileSync(modelsPath, readFileSync(modelsPath, 'utf8')
+      .replace('/** Runtime-validating data root. @typert schema */\nexport interface Payload {\n  name: string\n  count?: number\n}', "import type { Payload } from './wire-model.ts'\nexport type { Payload } from './wire-model.ts'"))
+    const wireModelPath = join(hostRoot, 'src/wire-model.ts')
+    writeFileSync(wireModelPath, [
+      "import type { WirePart } from '@fixture/wire-part'",
+      '/** Runtime-validating data root. @typert schema */',
+      'export interface Payload {',
+      '  name: string',
+      '  count?: number',
+      '  wire: WirePart',
+      '}',
+      '',
+    ].join('\n'))
+    const hostSourcePath = join(hostRoot, 'src/index.ts')
+    writeFileSync(hostSourcePath, readFileSync(hostSourcePath, 'utf8')
+      .replace('return { name: agent.id, count: Object.keys(flags).length }',
+        'const wire = { direct: "", linked: "" }; return { name: agent.id, count: Object.keys(flags).length, wire }'))
+
+    const baseConfigPath = join(root, 'tsconfig.base.json')
+    const baseConfig = JSON.parse(readFileSync(baseConfigPath, 'utf8')) as {
+      compilerOptions: { paths: Record<string, string[]>; preserveSymlinks?: boolean }
+    }
+    baseConfig.compilerOptions.paths['@fixture/host'] = ['./linked-host/src/index.ts']
+    baseConfig.compilerOptions.paths['@fixture/host/*'] = ['./linked-host/src/*']
+    baseConfig.compilerOptions.preserveSymlinks = true
+    writeFileSync(baseConfigPath, `${JSON.stringify(baseConfig, null, 2)}\n`)
+
+    const program = ts.createProgram([wireModelPath, linkedModels], {
+      target: ts.ScriptTarget.ES2024,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      strict: true,
+      preserveSymlinks: true,
+    })
+    const checker = program.getTypeChecker()
+    const wireTypeFor = (file: string): ts.Type => {
+      const source = program.getSourceFile(file)
+      if (source === undefined) throw new Error(`missing source file ${file}`)
+      const payload = source.statements.find(statement =>
+        ts.isInterfaceDeclaration(statement) && statement.name.text === 'Payload')
+      if (payload === undefined || !ts.isInterfaceDeclaration(payload)) throw new Error('missing Payload')
+      const wire = payload.members.find(member =>
+        ts.isPropertySignature(member) && ts.isIdentifier(member.name) && member.name.text === 'wire')
+      if (wire === undefined || !ts.isPropertySignature(wire) || wire.type === undefined) throw new Error('missing wire property type')
+      return checker.getTypeAtLocation(wire.type)
+    }
+    const directWireType = wireTypeFor(wireModelPath)
+    const linkedWireType = wireTypeFor(linkedModels)
+    const options = program.getCompilerOptions()
+    const directResolution = ts.resolveModuleName('@fixture/wire-part', wireModelPath, options, ts.sys).resolvedModule
+    const linkedResolution = ts.resolveModuleName('@fixture/wire-part', linkedModels, options, ts.sys).resolvedModule
+    expect(directResolution?.packageId?.version).toBe('1.0.0')
+    expect(linkedResolution?.packageId?.version).toBe('2.0.0')
+    expect(checker.typeToString(directWireType)).toBe('any')
+    expect(checker.typeToString(linkedWireType)).toBe('unknown')
+    expect(checker.isTypeAssignableTo(directWireType, linkedWireType)).toBe(true)
+    expect(checker.isTypeAssignableTo(linkedWireType, directWireType)).toBe(true)
+
+    expect(() => new WorkspaceAnalyzer({ root }).analyze())
+      .toThrow('cross-face reference Payload is not exported by @fixture/host at .')
+  })
+
   it('accepts package export forms while skipping artifact-only rows and unexported packages', { timeout: 180_000 }, () => {
     const root = copyFixture('typert-export-forms-')
     const hostRoot = join(root, 'packages/host')

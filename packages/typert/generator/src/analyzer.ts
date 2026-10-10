@@ -1940,6 +1940,7 @@ class FaceAnalyzer {
     const registration = this.registrationForFile(declaration.getSourceFile().fileName)
     if (registration === undefined) this.fail(site, `type ${symbol.name} is not owned by a workspace package`)
     const candidates: RemoteTypeImportModel[] = []
+    let declarationResolvesDifferently = false
     for (const [subpath, target] of packageExportTargets(registration.manifest)) {
       if ((subpath === '.' && !PUBLIC_REMOTE_TYPE_ROOTS.has(registration.name))
         || subpath === './package.json' || subpath === './typert'
@@ -1949,7 +1950,12 @@ class FaceAnalyzer {
       const moduleSymbol = this.checker.getSymbolAtLocation(sourceFile)
       if (moduleSymbol === undefined) continue
       for (const exported of this.checker.getExportsOfModule(moduleSymbol)) {
-        if (this.resolveSymbol(exported) !== symbol) continue
+        const exportedSymbol = this.resolveSymbol(exported)
+        if (!sameSourceDeclarations(exportedSymbol, symbol)) continue
+        if (!this.sameSourceType(exportedSymbol, symbol)) {
+          declarationResolvesDifferently = true
+          continue
+        }
         candidates.push({
           symbol: this.symbolId(symbol),
           specifier: packageExportSpecifier(registration.name, subpath),
@@ -1960,9 +1966,57 @@ class FaceAnalyzer {
     const selected = candidates.sort((left, right) =>
       left.specifier.localeCompare(right.specifier) || left.name.localeCompare(right.name))[0]
     if (selected === undefined) {
+      if (declarationResolvesDifferently) {
+        this.fail(site, `Remote boundary type ${symbol.name} resolves to a different type through its public package import`)
+      }
       this.fail(site, `Remote boundary type ${symbol.name} must be exported from a public non-root type subpath`)
     }
     return selected
+  }
+
+  private sameSourceType(left: ts.Symbol, right: ts.Symbol): boolean {
+    if (!sameSourceDeclarations(left, right)) return false
+    const leftDeclaration = preferredDeclaration(left)
+    const rightDeclaration = preferredDeclaration(right)
+    if (leftDeclaration === undefined || rightDeclaration === undefined) return false
+    return this.sameSourceResolutionContext(leftDeclaration.getSourceFile(), rightDeclaration.getSourceFile())
+      && this.sameResolvedType(left, right)
+  }
+
+  private sameSourceResolutionContext(left: ts.SourceFile, right: ts.SourceFile): boolean {
+    const paths = [...new Set([
+      left.fileName,
+      right.fileName,
+      realPath(left.fileName),
+      realPath(right.fileName),
+    ])]
+    const options = this.program.getCompilerOptions()
+    return moduleSpecifiersOfSource(left).every((specifier) => {
+      const resolutionIdentity = (containingFile: string): string | undefined => {
+        const resolution = ts.resolveModuleName(
+          specifier.text,
+          containingFile,
+          options,
+          this.host,
+        ).resolvedModule
+        if (resolution === undefined) return undefined
+        return JSON.stringify([
+          realPath(resolution.resolvedFileName),
+          resolution.packageId?.name,
+          resolution.packageId?.version,
+          resolution.packageId?.subModuleName,
+        ])
+      }
+      const identities = paths.map(resolutionIdentity)
+      return identities.every(identity => identity === identities[0])
+    })
+  }
+
+  private sameResolvedType(left: ts.Symbol, right: ts.Symbol): boolean {
+    const leftType = this.checker.getDeclaredTypeOfSymbol(left)
+    const rightType = this.checker.getDeclaredTypeOfSymbol(right)
+    return this.checker.isTypeAssignableTo(leftType, rightType)
+      && this.checker.isTypeAssignableTo(rightType, leftType)
   }
 
   private isWorkspaceClass(symbol: ts.Symbol): boolean {
@@ -2637,7 +2691,7 @@ class FaceAnalyzer {
       .find((candidate) => {
         if (candidate.name !== requestedName) return false
         const exportedSymbol = this.resolveSymbol(candidate)
-        return exportedSymbol === symbol || sameSourceDeclarations(exportedSymbol, symbol)
+        return this.sameSourceType(exportedSymbol, symbol)
       })
     return exported?.name
   }
@@ -2905,6 +2959,26 @@ function sameSourceDeclarations(left: ts.Symbol, right: ts.Symbol): boolean {
   return leftDeclarations.length > 0
     && leftDeclarations.length === rightDeclarations.length
     && leftDeclarations.every((declaration, index) => declaration === rightDeclarations[index])
+}
+
+function moduleSpecifiersOfSource(sourceFile: ts.SourceFile): ts.StringLiteralLike[] {
+  const result: ts.StringLiteralLike[] = []
+  const visit = (node: ts.Node): void => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+      && node.moduleSpecifier !== undefined && ts.isStringLiteralLike(node.moduleSpecifier)) {
+      result.push(node.moduleSpecifier)
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
+      && ts.isStringLiteralLike(node.argument.literal)) {
+      result.push(node.argument.literal)
+    } else if (ts.isImportEqualsDeclaration(node)
+      && ts.isExternalModuleReference(node.moduleReference)
+      && ts.isStringLiteralLike(node.moduleReference.expression)) {
+      result.push(node.moduleReference.expression)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  return result
 }
 
 function optionalParent(node: ts.Node): ts.Node | undefined {
