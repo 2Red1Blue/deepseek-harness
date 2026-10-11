@@ -8,9 +8,9 @@ Follow the [root instructions](../AGENTS.md), the [documentation standard](../do
 
 Keep canonical prose and generated catalogs in their owning `docs/` tier, then expose selected pages through [docs.ts](docs.ts). Never add locale, route, API, or copied documentation trees such as `website/zh-CN/`, `website/en/`, or `website/api/`.
 
-The projector writes disposable Markdown to the ignored `website/.generated/` directory. Never edit or commit `.generated/`, `.cache/`, or `.dist/`.
+The projector writes disposable Markdown to `.generated/`, and VitePress uses `.cache/` and `.dist/`. Without an external root these paths remain under `website/`; `ecobuild` sets `DSH_DOCS_OUTPUT_ROOT` for this project and places all three under the external project output. Never edit or commit these generated directories.
 
-Production builds remove the configured output directory after VitePress resolves the site configuration and before it writes files. They reject output whose lexical path or nearest existing parent escapes the real site root, and unlink a link-shaped output instead of traversing its target. Raw-Markdown emission then treats files produced by that build as occupied and never overwrites them.
+Production builds remove the configured output directory after VitePress resolves the site configuration and before it writes files. The output must stay under the website source root or an explicitly configured external root; the external root must not overlap the source tree and must use a different mounted device. The cleaner checks the resolved parent and unlinks a link-shaped output instead of traversing its target. Raw-Markdown emission then treats files produced by that build as occupied and never overwrites them.
 
 The build also emits each route's raw-Markdown twin (with a parent-level alias per index route) and a root `llms.txt` index into `.dist/`, so a page's URL, minus any trailing slash, plus `.md` serves it as plain Markdown. Both derive from the publication manifest at build time; neither is ever a file in this tree.
 

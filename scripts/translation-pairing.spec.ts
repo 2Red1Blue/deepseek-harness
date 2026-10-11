@@ -101,13 +101,16 @@ describe('translation pairing index reads', () => {
 describe('translation pairing manifest', () => {
   it('accepts an exclusions-only manifest', () => {
     const manifest = parseTranslationPairingManifest(JSON.stringify({
-      excluded: ['docs/generated/'],
+      excluded: ['docs/generated/', 'docs/external/'],
     }))
     expect(manifest).toEqual({
-      excluded: ['docs/generated/'],
+      excluded: ['docs/generated/', 'docs/external/'],
     })
     expect(isTranslationPairingManifestExcluded('docs/generated/page.md', manifest)).toBe(true)
     expect(translationPairSourcePredicate(manifest)('docs/generated/page.md')).toBe(false)
+    expect(isTranslationPairingManifestExcluded('docs/external/agent-fabric/notion/page.md', manifest)).toBe(true)
+    expect(translationPairSourcePredicate(manifest)('docs/external/agent-fabric/notion/page.md')).toBe(false)
+    expect(translationPairSourcePredicate(manifest)('docs/external-notes/page.md')).toBe(true)
     expect(translationPairSourcePredicate(manifest)('docs/guide.md')).toBe(true)
     expect(translationPairSourcePredicate(manifest)('packages/example/guide.md')).toBe(false)
   })

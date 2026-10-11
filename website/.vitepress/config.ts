@@ -7,10 +7,17 @@ import type { ViteDevServer } from 'vite'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 import { codeGroupFallbackHead, isolateCodeGroupRadios } from './code-groups.ts'
 import { landingLink, localeCollections, orderedPages, routeLink, sectionSpec, type DocsLocale, type DocsPage, type DocsSidebar } from '../docs.ts'
+import { assertExternalWebsiteBuildRoot, bindWebsiteBuildDependencies, resolveWebsiteBuildPaths } from '../build-paths.ts'
 import { docsSourceFiles, emitRawMarkdownPages, llmsTxt, projectDocs } from '../../scripts/project-doc-site.ts'
 import { rawMarkdownMiddleware } from '../raw-markdown.ts'
 
-projectDocs()
+const websiteRoot = resolve(import.meta.dirname, '..')
+const buildPaths = resolveWebsiteBuildPaths(websiteRoot, process.env.DSH_DOCS_OUTPUT_ROOT)
+if (buildPaths.externalOutputRoot !== undefined) {
+  assertExternalWebsiteBuildRoot(websiteRoot, buildPaths.externalOutputRoot)
+  bindWebsiteBuildDependencies(websiteRoot, buildPaths.externalOutputRoot)
+}
+projectDocs(buildPaths.generatedRoot)
 
 function sidebar(locale: DocsLocale, collection: NonNullable<DocsPage['sidebar']>): DefaultTheme.SidebarItem[] {
   // `orderedPages` already sorts by section placement, so insertion order
@@ -109,7 +116,7 @@ function watchCanonicalDocs(server: ViteDevServer): void {
   server.watcher.add(sources)
   server.watcher.on('change', (changed) => {
     if (!sources.includes(changed)) return
-    projectDocs()
+    projectDocs(buildPaths.generatedRoot)
   })
 }
 
@@ -279,9 +286,9 @@ export default withMermaid({
     ['script', {}, scrollbarScript],
   ],
   cleanUrls: true,
-  srcDir: '.generated',
-  cacheDir: '.cache',
-  outDir: '.dist',
+  srcDir: buildPaths.generatedRoot,
+  cacheDir: buildPaths.cacheDir,
+  outDir: buildPaths.outDir,
   locales: {
     root: {
       label: '简体中文',

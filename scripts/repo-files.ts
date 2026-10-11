@@ -27,6 +27,34 @@ export function isArchivedAgentNotePath(path: string): boolean {
 }
 
 /**
+ * Whether a repository-relative path is an imported external-source snapshot, not maintained project documentation.
+ * @param path - Repository-relative path.
+ * @returns Whether the path belongs to the external snapshot tree.
+ */
+export function isImportedReferenceSnapshotPath(path: string): boolean {
+  return path.replaceAll('\\', '/').startsWith('docs/external/')
+}
+
+/**
+ * Whether a repository-relative path is local execution evidence, not maintained source.
+ * @param path - Repository-relative path.
+ * @returns Whether the path belongs to a local evidence tree.
+ */
+export function isLocalExecutionEvidencePath(path: string): boolean {
+  const normalized = path.replaceAll('\\', '/')
+  return normalized.startsWith('.ccg/') || normalized.startsWith('.playwright-cli/')
+}
+
+/**
+ * Whether a discovered Markdown path is in the maintained documentation corpus.
+ * @param path - Repository-relative path.
+ * @returns Whether documentation source gates should inspect the path.
+ */
+export function isMaintainedMarkdownPath(path: string): boolean {
+  return !isArchivedAgentNotePath(path) && !isImportedReferenceSnapshotPath(path)
+}
+
+/**
  * Whether a pattern segment matches a directory or file name. Supports `*` and
  * `?` inside a segment and mirrors node's glob `dot: false`: a segment whose
  * first character is a wildcard does not match dot names. `**` is handled as a

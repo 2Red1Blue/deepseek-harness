@@ -12,6 +12,7 @@ import { existsSync, globSync, readFileSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { JSDOM } from 'jsdom'
 import { rawMarkdownFiles } from './project-doc-site.ts'
+import { assertExternalWebsiteBuildRoot, resolveWebsiteBuildPaths } from '../website/build-paths.ts'
 
 const root = resolve(import.meta.dirname, '..')
 
@@ -152,7 +153,12 @@ export function missingSiteFiles(distRoot: string, expected: readonly string[]):
 }
 
 function main(): number {
-  const distRoot = resolve(root, 'website/.dist')
+  const websiteRoot = resolve(root, 'website')
+  const paths = resolveWebsiteBuildPaths(websiteRoot, process.env.DSH_DOCS_OUTPUT_ROOT)
+  if (paths.externalOutputRoot !== undefined) {
+    assertExternalWebsiteBuildRoot(websiteRoot, paths.externalOutputRoot)
+  }
+  const distRoot = paths.outDir
   const report = inspectSiteFragments(distRoot)
   const expected = rawMarkdownFiles()
   const missing = missingSiteFiles(distRoot, [...expected, 'llms.txt'])

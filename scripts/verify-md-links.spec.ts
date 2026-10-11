@@ -60,6 +60,23 @@ describe('Markdown source discovery', () => {
       join('packages', 'core', 'probe', 'README.md'),
     ])
   })
+
+  it('checks maintained docs while excluding imported snapshots as sources', () => {
+    const root = layout({
+      'docs/user/guide.md': '[missing](missing.md)\n',
+      'docs/external/agent-fabric/notion/page.md': '[snapshot](missing.md)\n',
+      'docs/external-notes/guide.md': '[nearby](missing.md)\n',
+    })
+    const sources = markdownLinkSourcePaths(root)
+    expect(sources).toContain(join('docs', 'user', 'guide.md'))
+    expect(sources).not.toContain(join('docs', 'external', 'agent-fabric', 'notion', 'page.md'))
+    expect(sources).toContain(join('docs', 'external-notes', 'guide.md'))
+    const violations = sources.flatMap(file => findViolations(join(root, file), anchorCache(), root))
+    expect(violations.map(({ file }) => file).sort()).toEqual([
+      join('docs', 'external-notes', 'guide.md'),
+      join('docs', 'user', 'guide.md'),
+    ])
+  })
 })
 
 describe('documentAnchors', () => {

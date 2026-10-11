@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, readFileSync, readlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { isImportedReferenceSnapshotPath } from './repo-files.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const unavailableOwner = ['deepseek', 'ai'].join('-')
@@ -55,7 +56,7 @@ export interface UnavailableRepositoryReference {
  * @returns every matching source line, excluding frozen archived Agent Notes.
  */
 export function findUnavailableRepositoryReferences(file: string, source: string): UnavailableRepositoryReference[] {
-  if (file.startsWith(archivedAgentNotePrefix)) return []
+  if (file.startsWith(archivedAgentNotePrefix) || isImportedReferenceSnapshotPath(file)) return []
 
   const references: UnavailableRepositoryReference[] = []
   for (const [index, line] of source.split('\n').entries()) {

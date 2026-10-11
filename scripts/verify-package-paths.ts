@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url'
 import { historicalSchemaRegion } from './historical-schema-region.ts'
 import {
   findReferenceViolations,
-  isArchivedAgentNotePath,
+  isMaintainedMarkdownPath,
   uniqueRepoFiles,
   type ReferenceViolation as Violation,
 } from './repo-files.ts'
@@ -32,7 +32,16 @@ const PATTERNS = [
 
 /** Paths excluded from the scan: built output and vendored upstream source. */
 const isExcluded = (p: string): boolean =>
-  isArchivedAgentNotePath(p) || p.includes('/lib/') || p.endsWith('.d.ts') || p.startsWith('vendor/')
+  !isMaintainedMarkdownPath(p) || p.includes('/lib/') || p.endsWith('.d.ts') || p.startsWith('vendor/')
+
+/**
+ * Discover maintained prose and source files whose package references are checked.
+ * @param repoRoot - Repository root to scan.
+ * @returns Absolute paths matched by the maintained-source patterns.
+ */
+export function packagePathSourceFiles(repoRoot: string = root): string[] {
+  return uniqueRepoFiles(repoRoot, PATTERNS, isExcluded).map(file => file.abs)
+}
 
 /**
  * Directory names of every real package, `packages/<group>/<pkg>`. A broken
@@ -99,8 +108,8 @@ const invokedPath = process.argv[1]
 const isMain = invokedPath !== undefined && import.meta.url === pathToFileURL(resolve(invokedPath)).href
 if (isMain) {
   const packageNames = realPackageNames(root)
-  const files = uniqueRepoFiles(root, PATTERNS, isExcluded)
-  const all = files.flatMap(file => findPackagePathViolations(root, file.real, packageNames))
+  const files = packagePathSourceFiles()
+  const all = files.flatMap(file => findPackagePathViolations(root, file, packageNames))
   if (all.length === 0) {
     console.log(`verify-package-paths: ${files.length} file(s) checked, all maintained packages/* references resolve.`)
   } else {

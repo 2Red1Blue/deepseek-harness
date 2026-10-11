@@ -2,7 +2,12 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { uniqueRepoFiles } from './repo-files.ts'
+import {
+  isImportedReferenceSnapshotPath,
+  isLocalExecutionEvidencePath,
+  isMaintainedMarkdownPath,
+  uniqueRepoFiles,
+} from './repo-files.ts'
 
 interface Tree {
   root: string
@@ -26,6 +31,17 @@ function makeTree(): Tree {
 }
 
 describe('uniqueRepoFiles', () => {
+  it('classifies local references and evidence outside the maintained documentation corpus', () => {
+    expect(isImportedReferenceSnapshotPath('docs/external/agent-fabric/notion/page.md')).toBe(true)
+    expect(isImportedReferenceSnapshotPath('docs/external-notes/page.md')).toBe(false)
+    expect(isMaintainedMarkdownPath('docs/user/guide.md')).toBe(true)
+    expect(isMaintainedMarkdownPath('docs/external/agent-fabric/notion/page.md')).toBe(false)
+    expect(isMaintainedMarkdownPath('.agents/notes/archived/process/frozen.md')).toBe(false)
+    expect(isLocalExecutionEvidencePath('.ccg/runs/report.md')).toBe(true)
+    expect(isLocalExecutionEvidencePath('.playwright-cli/page.yml')).toBe(true)
+    expect(isLocalExecutionEvidencePath('docs/user/guide.md')).toBe(false)
+  })
+
   it('enumerates ** matches without probing a symlinked file as a directory', () => {
     const tree = makeTree()
     try {

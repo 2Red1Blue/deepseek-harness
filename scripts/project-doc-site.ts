@@ -417,10 +417,13 @@ function projectPagesInto(
   }
 }
 
-/** Rebuild the disposable VitePress source tree from the publication manifest. */
-export function projectDocs(): void {
-  rmSync(generatedRoot, { recursive: true, force: true })
-  projectPagesInto(generatedRoot, defaultProjectionContext(), (markdown, page) =>
+/**
+ * Rebuild the disposable VitePress source tree from the publication manifest.
+ * @param targetRoot - disposable projection directory; defaults to the local website development tree.
+ */
+export function projectDocs(targetRoot: string = generatedRoot): void {
+  rmSync(targetRoot, { recursive: true, force: true })
+  projectPagesInto(targetRoot, defaultProjectionContext(), (markdown, page) =>
     addProjectionFrontmatter(projectedPageContent(markdown, page), page))
 }
 

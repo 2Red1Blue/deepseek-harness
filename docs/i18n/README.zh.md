@@ -47,7 +47,7 @@
 
 ## 范围与排除
 
-**范围**：根目录 `CONTRIBUTING.md`、`BRAND_GUIDELINES.md` 与 `SAFETY.md` 文档、除 vendor 源码外的全部 README，以及 `.agents/notes/**`、`docs/**` 与 `python/**` 下的全部活跃文档。匹配 README 时只看文件名且不区分大小写，因此今后新增的目录无需再修改 manifest。依赖目录、被忽略的构建产物目录以及冻结的 `.agents/notes/archived/` 目录树只在发现阶段排除，不属于持续演进的翻译源文档。
+**范围**：根目录 `CONTRIBUTING.md`、`BRAND_GUIDELINES.md` 与 `SAFETY.md` 文档、除 vendor 源码外的全部 README，以及 `.agents/notes/**`、`docs/**`（不含 `docs/external/**`）与 `python/**` 下的全部活跃文档。匹配 README 时只看文件名且不区分大小写，因此今后新增的目录无需再修改 manifest。依赖目录、被忽略的构建产物目录、从外部来源导入并保留供本地参考的 `docs/external/` 快照以及冻结的 `.agents/notes/archived/` 目录树只在发现阶段排除，不属于持续演进的翻译源文档。
 
 有经评审的中文对侧的生成英文参考文档和图文档遵循配对规则。生成器把生成数据放在生成区域中，并把每个区域写入两种语言的页面，因此重新生成不需要手工更新中文，也不需要重新记录；只有区域外的说明文字需要翻译并计入记录。新鲜度门禁与配对门禁各自独立强制其约束。
 
@@ -62,6 +62,7 @@
 - `docs/i18n/terminology.md` 与 [style-samples.md](style-samples.md)：二者本身即为中英对照文档。
 - [translation-prompt.md](translation-prompt.md)：自动翻译流水线的提示词模板；正文逐字进入模型请求，配对翻译会改变流水线行为。
 - [review-ownership/README.md](../../.github/review-ownership/README.md)：仓库内部审批策略，只以英文维护。
+- `docs/external/`：从外部来源导入的本地参考快照，不是 DSH 文档或网站输入。
 - `.agents/notes/archived/`：冻结的历史三文件配对。[`verify-archived-agent-notes`](../../scripts/verify-archived-agent-notes.ts) 校验其完整性和内容封存记录；翻译维护绝不能重写这些文件。
 
 **统一要求**：当前及今后纳入范围的每篇文档，合并时都必须构成完整的双语配对。[scripts/translation-pairing.manifest.json](../../scripts/translation-pairing.manifest.json) 只包含显式排除项；不存在逐文件推进清单、日期分界或 README 专用政策类别。

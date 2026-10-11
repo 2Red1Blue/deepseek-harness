@@ -4,6 +4,7 @@ import { lstatSync, realpathSync, rmSync, unlinkSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'vitepress'
+import { assertExternalWebsiteBuildRoot, resolveWebsiteBuildPaths } from './build-paths.ts'
 
 const websiteRoot = resolve(import.meta.dirname)
 type DocSiteBuildOptions = NonNullable<Parameters<typeof build>[1]>
@@ -29,20 +30,23 @@ function nearestExistingAncestor(path: string): string {
  * Remove one documentation build output without traversing a link-shaped output or an outside parent.
  * @param siteRoot - VitePress site root that owns the output.
  * @param outDir - Resolved VitePress output directory.
- * @throws When `outDir` is not a proper child of `siteRoot` or its existing parent resolves outside it.
+ * @param externalOutputRoot - optional external root that owns `outDir`.
+ * @throws When `outDir` is not a proper child of its owning root or its existing parent resolves outside it.
  */
-export function cleanDocSiteOutput(siteRoot: string, outDir: string): void {
+export function cleanDocSiteOutput(siteRoot: string, outDir: string, externalOutputRoot?: string): void {
   const root = resolve(siteRoot)
   const output = resolve(outDir)
-  const child = relative(root, output)
-  if (child === '' || escapesRoot(root, output)) {
-    throw new Error(`website/build: output directory ${JSON.stringify(output)} must be a child of site root ${JSON.stringify(root)}.`)
+  const allowedRoot = externalOutputRoot === undefined ? root : resolve(externalOutputRoot)
+  const allowedRootLabel = externalOutputRoot === undefined ? 'site root' : 'output root'
+  const child = relative(allowedRoot, output)
+  if (child === '' || escapesRoot(allowedRoot, output)) {
+    throw new Error(`website/build: output directory ${JSON.stringify(output)} must be a child of ${allowedRootLabel} ${JSON.stringify(allowedRoot)}.`)
   }
 
-  const realRoot = realpathSync(root)
+  const realAllowedRoot = realpathSync(allowedRoot)
   const realParent = realpathSync(nearestExistingAncestor(dirname(output)))
-  if (escapesRoot(realRoot, realParent)) {
-    throw new Error(`website/build: output directory ${JSON.stringify(output)} must resolve inside site root ${JSON.stringify(realRoot)}.`)
+  if (escapesRoot(realAllowedRoot, realParent)) {
+    throw new Error(`website/build: output directory ${JSON.stringify(output)} must resolve inside ${allowedRootLabel} ${JSON.stringify(realAllowedRoot)}.`)
   }
 
   const outputStats = lstatSync(output, { throwIfNoEntry: false })
@@ -57,21 +61,27 @@ export function cleanDocSiteOutput(siteRoot: string, outDir: string): void {
  * Create VitePress build options that remove the resolved output directory before bundling.
  * @param siteRoot - VitePress site root to build.
  * @param mpa - Whether to use VitePress's multi-page application build.
+ * @param externalOutputRoot - optional external root for generated website files.
  * @returns VitePress options with project-owned output preparation.
  */
-export function docSiteBuildOptions(siteRoot: string, mpa: boolean): DocSiteBuildOptions {
+export function docSiteBuildOptions(siteRoot: string, mpa: boolean, externalOutputRoot?: string): DocSiteBuildOptions {
   const root = resolve(siteRoot)
+  const paths = resolveWebsiteBuildPaths(root, externalOutputRoot)
+  if (paths.externalOutputRoot !== undefined) {
+    assertExternalWebsiteBuildRoot(root, paths.externalOutputRoot)
+  }
   return {
     ...mpa ? { mpa: 'true' } : {},
+    outDir: paths.outDir,
     onAfterConfigResolve(siteConfig) {
-      cleanDocSiteOutput(root, siteConfig.outDir)
+      cleanDocSiteOutput(root, siteConfig.outDir, paths.externalOutputRoot)
     },
   }
 }
 
 async function buildDocSite(siteRoot: string, mpa: boolean): Promise<void> {
   const root = resolve(siteRoot)
-  await build(root, docSiteBuildOptions(root, mpa))
+  await build(root, docSiteBuildOptions(root, mpa, process.env.DSH_DOCS_OUTPUT_ROOT))
 }
 
 function parseMpa(args: string[]): boolean {

@@ -12,7 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cleanDocSiteOutput, docSiteBuildOptions } from '../website/build.ts'
 import { docsPages, landingLink, routeLink, sectionSpec, type DocsPage } from '../website/docs.ts'
 import {
-  addProjectionFrontmatter, emitRawMarkdownPages, llmsTxt, projectedPageContent, publishableImage,
+  addProjectionFrontmatter, emitRawMarkdownPages, llmsTxt, projectedPageContent, projectDocs, publishableImage,
   rawMarkdownFiles, rawMarkdownPageContent, rawMarkdownRoute, resolveRepositoryRef, rewriteMarkdown,
 } from './project-doc-site.ts'
 
@@ -105,6 +105,29 @@ describe('documentation site build', () => {
     }).toThrow('must be a child of site root')
     expect(readFileSync(join(root, 'keep'), 'utf8')).toBe('root\n')
     expect(readFileSync(join(outside, 'keep'), 'utf8')).toBe('outside\n')
+  })
+
+  it('cleans a build output only inside its explicitly selected external root', () => {
+    const site = mkdtempSync(join(tmpdir(), 'dsh-doc-build-site-'))
+    const outputRoot = mkdtempSync(join(tmpdir(), 'dsh-doc-build-output-'))
+    roots.push(site, outputRoot)
+    const outDir = join(outputRoot, '.dist')
+    mkdirSync(outDir)
+    writeFileSync(join(outDir, 'stale.md'), 'stale\n')
+    writeFileSync(join(outputRoot, 'keep'), 'outside output\n')
+
+    cleanDocSiteOutput(site, outDir, outputRoot)
+
+    expect(existsSync(outDir)).toBe(false)
+    expect(readFileSync(join(outputRoot, 'keep'), 'utf8')).toBe('outside output\n')
+    expect(() => { cleanDocSiteOutput(site, site, outputRoot) }).toThrow('must be a child of output root')
+  })
+
+  it('rejects an external docs output root on the source device', () => {
+    const site = mkdtempSync(join(tmpdir(), 'dsh-doc-build-source-'))
+    const outputRoot = mkdtempSync(join(tmpdir(), 'dsh-doc-build-same-device-'))
+    roots.push(site, outputRoot)
+    expect(() => docSiteBuildOptions(site, false, outputRoot)).toThrow('different mounted device')
   })
 
   it('unlinks a link-shaped output without removing its target', () => {
@@ -564,6 +587,20 @@ describe('sidebar ordering', () => {
   })
 })
 
+describe('projectDocs output ownership', () => {
+  it('writes only to the selected projection root', () => {
+    const targetRoot = mkdtempSync(join(tmpdir(), 'dsh-doc-projection-'))
+    roots.push(targetRoot)
+    const internalIndex = join(repositoryRoot, 'website/.generated/index.md')
+    const previousInternal = existsSync(internalIndex) ? readFileSync(internalIndex) : undefined
+
+    projectDocs(targetRoot)
+
+    expect(existsSync(join(targetRoot, 'index.md'))).toBe(true)
+    if (previousInternal !== undefined) expect(readFileSync(internalIndex)).toEqual(previousInternal)
+  })
+})
+
 describe('addProjectionFrontmatter', () => {
   it('adds frontmatter to an ordinary Markdown page', () => {
     expect(addProjectionFrontmatter('# Guide\n', { source: 'docs/guide.md', route: 'en/guide.md', sidebar: 'en-guide' })).toBe(
@@ -586,6 +623,20 @@ describe('addProjectionFrontmatter', () => {
     })).toBe(
       '---\neditSource: "docs/catalog.md"\nrawMarkdownPath: "reference/index.md"\noutline: [2,4]\n---\n\n# Catalog\n',
     )
+  })
+})
+
+describe('projectDocs output ownership', () => {
+  it('writes only to the selected projection root', () => {
+    const targetRoot = mkdtempSync(join(tmpdir(), 'dsh-doc-projection-'))
+    roots.push(targetRoot)
+    const internalIndex = join(repositoryRoot, 'website/.generated/index.md')
+    const previousInternal = existsSync(internalIndex) ? readFileSync(internalIndex) : undefined
+
+    projectDocs(targetRoot)
+
+    expect(existsSync(join(targetRoot, 'index.md'))).toBe(true)
+    if (previousInternal !== undefined) expect(readFileSync(internalIndex)).toEqual(previousInternal)
   })
 })
 

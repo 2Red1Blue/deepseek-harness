@@ -42,4 +42,13 @@ describe('repository link policy', () => {
       `https://github.com/${unavailableRepository}`,
     )).toEqual([{ file: '.agents/notes/implemented/process/active-record.md', line: 1 }])
   })
+
+  it('does not apply project-document policy to imported external reference snapshots', () => {
+    const unavailableRepository = ['deepseek-ai', 'deepseek-harness-sdk'].join('/')
+    const source = `https://github.com/${unavailableRepository}`
+    expect(findUnavailableRepositoryReferences('docs/external/agent-fabric/notion/page.md', source)).toEqual([])
+    expect(findUnavailableRepositoryReferences('docs/external-notes/current.md', source)).toEqual([
+      { file: 'docs/external-notes/current.md', line: 1 },
+    ])
+  })
 })

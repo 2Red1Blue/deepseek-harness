@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { findPackagePathViolations } from './verify-package-paths.ts'
+import { findPackagePathViolations, packagePathSourceFiles } from './verify-package-paths.ts'
 
 const historicalPath = 'docs/persistence-changes/historical-formats/v3.md'
 const removedReference = 'packages/fs/tool-present/src/types.ts'
@@ -26,6 +26,31 @@ function scan(file: string, source: string) {
 }
 
 describe('historical package references', () => {
+  it('checks maintained documentation paths and excludes imported snapshots', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-package-path-sources-'))
+    try {
+      for (const file of [
+        'docs/user/current.md',
+        'docs/external/agent-fabric/notion/page.md',
+        'docs/external-notes/current.md',
+      ]) {
+        const path = join(root, file)
+        mkdirSync(dirname(path), { recursive: true })
+        writeFileSync(path, `Reference ${removedReference}\n`)
+      }
+      expect(packagePathSourceFiles(root).map(path => relative(root, path)).sort()).toEqual([
+        'docs/external-notes/current.md',
+        'docs/user/current.md',
+      ])
+      const maintained = join(root, 'docs/user/current.md')
+      expect(findPackagePathViolations(root, maintained, new Set(['tool-present']))).toEqual([
+        { file: 'docs/user/current.md', line: 1, ref: removedReference },
+      ])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it.each(['v0.md', 'v3.md', 'v10.zh.md'])('preserves checked historical source paths in %s', (name) => {
     const file = `docs/persistence-changes/historical-formats/${name}`
     for (const newline of ['\n', '\r\n']) {

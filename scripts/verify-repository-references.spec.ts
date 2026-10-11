@@ -120,17 +120,22 @@ describe('maintained repository reference policy', () => {
     expect(scanRepositoryReferences(fixture.root)).toEqual([])
   })
 
-  it('excludes only ignored new files, vendored sources, frozen notes, and deleted files', (test) => {
+  it('excludes ignored files, vendored sources, frozen notes, imported snapshots, local evidence, and deleted files', (test) => {
     const fixture = repository(test)
     fixture.write('.gitignore', 'ignored.md\ntracked-ignore.md\n')
     fixture.write('ignored.md', fixture.commit)
     fixture.write('vendor/project/file.md', `${fixture.commit}\n${organizationUrl}`)
     fixture.write('.agents/notes/archived/process/frozen.md', `${fixture.commit}\n${organizationUrl}`)
+    fixture.write('docs/external/agent-fabric/notion/page.md', fixture.commit)
+    fixture.write('.ccg/runs/report.md', fixture.commit)
+    fixture.write('.playwright-cli/page.yml', fixture.commit)
+    fixture.write('docs/user/current.md', fixture.commit)
     fixture.write('tracked-ignore.md', fixture.commit)
     fixture.git(['add', '--force', 'tracked-ignore.md'])
     unlinkSync(join(fixture.root, 'tracked.md'))
 
     expect(scanRepositoryReferences(fixture.root)).toEqual([
+      { file: 'docs/user/current.md', line: 1, kind: 'commit-hash' },
       { file: 'tracked-ignore.md', line: 1, kind: 'commit-hash' },
     ])
   })
