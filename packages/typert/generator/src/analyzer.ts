@@ -623,6 +623,7 @@ class FaceAnalyzer {
   private readonly checker: ts.TypeChecker
   private readonly registrations: readonly PackageRegistration[]
   private readonly allRegistrations: readonly PackageRegistration[]
+  private readonly sourceNodeModules: readonly { logicalRoot: string; physicalRoot: string }[]
   private readonly mode: AnalysisMode
   private readonly queueEdit: (edit: SourceEdit) => void
   private readonly crossFaceLinks: Map<string, CrossFaceLink>
@@ -646,6 +647,7 @@ class FaceAnalyzer {
     this.checker = options.program.getTypeChecker()
     this.registrations = options.registrations
     this.allRegistrations = options.allRegistrations
+    this.sourceNodeModules = sourceNodeModules(this.root, this.allRegistrations)
     this.mode = options.mode
     this.queueEdit = options.queueEdit
     this.crossFaceLinks = options.crossFaceLinks
@@ -1943,6 +1945,7 @@ class FaceAnalyzer {
     const registration = this.registrationForFile(declaration.getSourceFile().fileName)
     if (registration === undefined) this.fail(site, `type ${symbol.name} is not owned by a workspace package`)
     const candidates: RemoteTypeImportModel[] = []
+    let declarationResolvesDifferently = false
     for (const [subpath, target] of packageExportTargets(registration.manifest)) {
       if ((subpath === '.' && !PUBLIC_REMOTE_TYPE_ROOTS.has(registration.name))
         || subpath === './package.json' || subpath === './typert'
@@ -1952,7 +1955,12 @@ class FaceAnalyzer {
       const moduleSymbol = this.checker.getSymbolAtLocation(sourceFile)
       if (moduleSymbol === undefined) continue
       for (const exported of this.checker.getExportsOfModule(moduleSymbol)) {
-        if (this.resolveSymbol(exported) !== symbol) continue
+        const exportedSymbol = this.resolveSymbol(exported)
+        if (!sameSourceDeclarations(exportedSymbol, symbol)) continue
+        if (!this.sameSourceType(exportedSymbol, symbol)) {
+          declarationResolvesDifferently = true
+          continue
+        }
         candidates.push({
           symbol: this.symbolId(symbol),
           specifier: packageExportSpecifier(registration.name, subpath),
@@ -1963,9 +1971,57 @@ class FaceAnalyzer {
     const selected = candidates.sort((left, right) =>
       left.specifier.localeCompare(right.specifier) || left.name.localeCompare(right.name))[0]
     if (selected === undefined) {
+      if (declarationResolvesDifferently) {
+        this.fail(site, `Remote boundary type ${symbol.name} resolves to a different type through its public package import`)
+      }
       this.fail(site, `Remote boundary type ${symbol.name} must be exported from a public non-root type subpath`)
     }
     return selected
+  }
+
+  private sameSourceType(left: ts.Symbol, right: ts.Symbol): boolean {
+    if (!sameSourceDeclarations(left, right)) return false
+    const leftDeclaration = preferredDeclaration(left)
+    const rightDeclaration = preferredDeclaration(right)
+    if (leftDeclaration === undefined || rightDeclaration === undefined) return false
+    return this.sameSourceResolutionContext(leftDeclaration.getSourceFile(), rightDeclaration.getSourceFile())
+      && this.sameResolvedType(left, right)
+  }
+
+  private sameSourceResolutionContext(left: ts.SourceFile, right: ts.SourceFile): boolean {
+    const paths = [...new Set([
+      left.fileName,
+      right.fileName,
+      realPath(left.fileName),
+      realPath(right.fileName),
+    ])]
+    const options = this.program.getCompilerOptions()
+    return moduleSpecifiersOfSource(left).every((specifier) => {
+      const resolutionIdentity = (containingFile: string): string | undefined => {
+        const resolution = ts.resolveModuleName(
+          specifier.text,
+          containingFile,
+          options,
+          this.host,
+        ).resolvedModule
+        if (resolution === undefined) return undefined
+        return JSON.stringify([
+          realPath(resolution.resolvedFileName),
+          resolution.packageId?.name,
+          resolution.packageId?.version,
+          resolution.packageId?.subModuleName,
+        ])
+      }
+      const identities = paths.map(resolutionIdentity)
+      return identities.every(identity => identity === identities[0])
+    })
+  }
+
+  private sameResolvedType(left: ts.Symbol, right: ts.Symbol): boolean {
+    const leftType = this.checker.getDeclaredTypeOfSymbol(left)
+    const rightType = this.checker.getDeclaredTypeOfSymbol(right)
+    return this.checker.isTypeAssignableTo(leftType, rightType)
+      && this.checker.isTypeAssignableTo(rightType, leftType)
   }
 
   private isWorkspaceClass(symbol: ts.Symbol): boolean {
@@ -2640,7 +2696,7 @@ class FaceAnalyzer {
       .find((candidate) => {
         if (candidate.name !== requestedName) return false
         const exportedSymbol = this.resolveSymbol(candidate)
-        return exportedSymbol === symbol || sameSourceDeclarations(exportedSymbol, symbol)
+        return this.sameSourceType(exportedSymbol, symbol)
       })
     return exported?.name
   }
@@ -2700,10 +2756,18 @@ class FaceAnalyzer {
     const sourceFile = node.getSourceFile()
     const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile))
     return {
-      file: slash(relative(this.root, sourceFile.fileName)),
+      file: slash(relative(this.root, this.logicalSourcePath(sourceFile.fileName))),
       line: position.line + 1,
       column: position.character + 1,
     }
+  }
+
+  private logicalSourcePath(file: string): string {
+    const physicalPath = realPath(file)
+    const alias = this.sourceNodeModules.find(candidate => isWithin(physicalPath, candidate.physicalRoot))
+    return alias === undefined
+      ? file
+      : join(alias.logicalRoot, relative(alias.physicalRoot, physicalPath))
   }
 
   private fail(node: ts.Node, message: string): never {
@@ -2916,6 +2980,26 @@ function sameSourceDeclarations(left: ts.Symbol, right: ts.Symbol): boolean {
   return leftDeclarations.length > 0
     && leftDeclarations.length === rightDeclarations.length
     && leftDeclarations.every((declaration, index) => declaration === rightDeclarations[index])
+}
+
+function moduleSpecifiersOfSource(sourceFile: ts.SourceFile): ts.StringLiteralLike[] {
+  const result: ts.StringLiteralLike[] = []
+  const visit = (node: ts.Node): void => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+      && node.moduleSpecifier !== undefined && ts.isStringLiteralLike(node.moduleSpecifier)) {
+      result.push(node.moduleSpecifier)
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
+      && ts.isStringLiteralLike(node.argument.literal)) {
+      result.push(node.argument.literal)
+    } else if (ts.isImportEqualsDeclaration(node)
+      && ts.isExternalModuleReference(node.moduleReference)
+      && ts.isStringLiteralLike(node.moduleReference.expression)) {
+      result.push(node.moduleReference.expression)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  return result
 }
 
 function optionalParent(node: ts.Node): ts.Node | undefined {
@@ -3274,6 +3358,25 @@ function formatProgramDiagnostic(root: string, face: TypertFace, diagnostic: ts.
   const position = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
   const file = slash(relative(root, diagnostic.file.fileName))
   return `typert(${face}): ${file}:${String(position.line + 1)}:${String(position.character + 1)}: TypeScript TS${String(diagnostic.code)}: ${message}`
+}
+
+function sourceNodeModules(
+  root: string,
+  registrations: readonly PackageRegistration[],
+): { logicalRoot: string; physicalRoot: string }[] {
+  const candidates = new Set<string>()
+  let directory = resolve(root)
+  for (;;) {
+    candidates.add(join(directory, 'node_modules'))
+    const parent = dirname(directory)
+    if (parent === directory) break
+    directory = parent
+  }
+  for (const registration of registrations) candidates.add(join(registration.root, 'node_modules'))
+  return [...candidates]
+    .filter(existsSync)
+    .map(logicalRoot => ({ logicalRoot, physicalRoot: realPath(logicalRoot) }))
+    .sort((left, right) => right.logicalRoot.length - left.logicalRoot.length)
 }
 
 const realPathCache = new Map<string, string>()

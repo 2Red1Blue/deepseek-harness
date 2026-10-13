@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
+import { lstatSync, mkdtempSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -64,7 +64,9 @@ describe('VitePress build paths', () => {
     const { site, output } = siteTree()
     const dependencies = join(output, 'node_modules')
     mkdirSync(dependencies)
+    const existing = realpathSync(dependencies)
     expect(() => { bindWebsiteBuildDependencies(site, output) }).toThrow('already contains another node_modules')
-    expect(realpathSync(dependencies)).toBe(dependencies)
+    expect(lstatSync(dependencies).isSymbolicLink()).toBe(false)
+    expect(realpathSync(dependencies)).toBe(existing)
   })
 })

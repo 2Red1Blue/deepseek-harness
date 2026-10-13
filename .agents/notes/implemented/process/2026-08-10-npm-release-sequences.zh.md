@@ -111,7 +111,7 @@ registry 的两个行为决定了「怎么尝试一次发布」。写入之间�
 | `ReleaseFamily` | 一族的身份：成员发现、版本基线、tag 前缀、打包 payload 规则、已安装入口 |
 | `ReleaseMember` | 一个可发布包：目录、包名、版本、manifest |
 | `publishOrder` | 按 npm 会安装的依赖段加 peer 声明做拓扑序，同层按包名排；安装依赖成环是报错而不是随意定序，任何排不进去的 peer 边被丢弃并点名 |
-| `pack` | 把整族打进一个目录并记录上传顺序 |
+| `pack` | 把整族打进一个目录并记录上传顺序；发布外置绑定产物时，在外置纯分发暂存目录中物化包管理器选中的文件和绑定产物，并在打包前按 manifest 名册解析 workspace 范围 |
 | `verify` | 族的版本基线、完整打印出来的发布顺序；发布时还要求本次运行来自该族的 tag、且成员可发布 |
 | `verify-packed-install` | 把一个或多个 pack 目录的 tarball 装进带[独立 npm 缓存](../bug-fix/2026-09-06-packed-install-private-npm-cache.zh.md)的一次性 consumer，并驱动已安装的可执行入口 |
 | `publish` | 上面那三态 |

@@ -12,8 +12,8 @@
  * differently. Locating those inputs is the CLI's job.
  * @module @deepseek-ai/dsh-experimental-webworker-packer/src/pack
  */
-import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { gzipSync } from 'node:zlib'
 
 import {
@@ -134,6 +134,93 @@ export interface PackOverlayResult {
 const readJson = (file: string): Record<string, unknown> =>
   JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** External build outputs admitted by the project's prepared build bindings. */
+interface ProjectBuildBindings {
+  readonly source: string
+  readonly output: string
+  readonly artifacts: Readonly<Record<string, unknown>>
+}
+
+/**
+ * Read the binding manifest paired with the dependency installation for one source
+ * tree. Build runners place it beside `install-stage/` and `artifacts/`.
+ * @param resolveFrom - Directory whose dependencies resolve the packed workspace.
+ * @returns The source-matched external bindings, or undefined when none are prepared.
+ */
+function projectBuildBindings(resolveFrom: string): ProjectBuildBindings | undefined {
+  const source = realpathSync(resolveFrom)
+  for (let directory = source; ; directory = dirname(directory)) {
+    const nodeModules = join(directory, 'node_modules')
+    if (existsSync(nodeModules)) {
+      const installed = realpathSync(nodeModules)
+      for (let output = installed; ; output = dirname(output)) {
+        const manifest = join(output, 'bindings.json')
+        if (existsSync(manifest)) {
+          const parsed = readJson(manifest)
+          if (parsed.schema === 'ecosystem-build-bindings.v1' && parsed.source === source && isRecord(parsed.artifacts)) {
+            return { source, output: realpathSync(output), artifacts: parsed.artifacts }
+          }
+        }
+        const parent = dirname(output)
+        if (parent === output) break
+      }
+    }
+    const parent = dirname(directory)
+    if (parent === directory) return undefined
+  }
+}
+
+/**
+ * Resolve a workspace package's external `lib` only when the project binding
+ * names that exact source path and keeps its target under this project's artifacts.
+ * @param packageRoot - Workspace package directory.
+ * @param link - The package-root `lib` symlink.
+ * @param bindings - Bindings paired with the packer's source tree.
+ * @returns The approved external directory.
+ * @throws When the symlink is absent from the binding manifest or escapes its artifact root.
+ */
+function boundWorkspaceLib(
+  packageRoot: string,
+  link: string,
+  bindings: ProjectBuildBindings | undefined,
+): string {
+  if (bindings === undefined) {
+    throw new Error(`vfs image: workspace lib symlink has no prepared project bindings: ${link}`)
+  }
+  const sourcePackage = realpathSync(packageRoot)
+  const packagePath = relative(bindings.source, sourcePackage).replaceAll('\\', '/')
+  if (packagePath === '..' || packagePath.startsWith('../') || isAbsolute(packagePath)) {
+    throw new Error(`vfs image: workspace package is outside the bound project: ${packageRoot}`)
+  }
+  const artifactPath = [packagePath === '.' ? '' : packagePath, 'lib'].filter(Boolean).join('/')
+  const declared = bindings.artifacts[artifactPath]
+  if (typeof declared !== 'string' || !isAbsolute(declared)) {
+    throw new Error(`vfs image: workspace lib has no external build binding for ${artifactPath}`)
+  }
+  const artifactDirectory = join(bindings.output, 'artifacts')
+  if (!lstatSync(artifactDirectory).isDirectory()) {
+    throw new Error(`vfs image: project artifacts root is not a directory: ${artifactDirectory}`)
+  }
+  const artifactRoot = realpathSync(artifactDirectory)
+  const artifactRootPath = relative(bindings.output, artifactRoot)
+  if (artifactRootPath === '..' || artifactRootPath.startsWith(`..${sep}`) || isAbsolute(artifactRootPath)) {
+    throw new Error(`vfs image: project artifacts root escapes its build directory: ${artifactDirectory}`)
+  }
+  const target = realpathSync(declared)
+  const withinArtifacts = relative(artifactRoot, target)
+  if (withinArtifacts === '..' || withinArtifacts.startsWith(`..${sep}`) || isAbsolute(withinArtifacts)) {
+    throw new Error(`vfs image: workspace lib binding escapes project artifacts: ${declared}`)
+  }
+  if (!lstatSync(link).isSymbolicLink() || realpathSync(link) !== target || !statSync(target).isDirectory()) {
+    throw new Error(`vfs image: workspace lib symlink does not match its external build binding: ${link}`)
+  }
+  return target
+}
+
 /**
  * Package name of a module specifier.
  * @param specifier - Module specifier, possibly with a subpath.
@@ -226,6 +313,9 @@ function resolveDependency(fromDirectory: string, name: string): string | undefi
  * @param keep - Filter over root-relative paths.
  * @param preserveDirectories - Whether dot directories and nested `node_modules`
  *   are ordinary fixture content rather than package-manager residue.
+ * @param externalLib - Optional resolver for the one package-root `lib` symlink.
+ *   It must return a project-bound artifact directory; nested and other symlinks
+ *   are never followed.
  */
 function collectTree(
   root: string,
@@ -233,17 +323,24 @@ function collectTree(
   prefix: string,
   keep: (relativePath: string) => boolean,
   preserveDirectories = false,
+  externalLib?: (link: string) => string,
 ): void {
-  const walk = (directory: string): void => {
+  const walk = (directory: string, base = ''): void => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const relativePath = (base === '' ? entry.name : `${base}/${entry.name}`).replaceAll('\\', '/')
+      const absolute = join(directory, entry.name)
       if (entry.isDirectory()) {
         if (!preserveDirectories && (entry.name === 'node_modules' || entry.name.startsWith('.'))) continue
-        walk(join(directory, entry.name))
+        walk(absolute, relativePath)
+        continue
+      }
+      if (entry.isSymbolicLink()) {
+        if (relativePath === 'lib' && externalLib !== undefined) {
+          walk(externalLib(absolute), relativePath)
+        }
         continue
       }
       if (!entry.isFile()) continue
-      const absolute = join(directory, entry.name)
-      const relativePath = relative(root, absolute).replaceAll('\\', '/')
       if (!keep(relativePath)) continue
       into[`${prefix}/${relativePath}`] = readFileSync(absolute)
     }
@@ -516,6 +613,7 @@ function dropExecutables(files: ImageFiles): string[] {
 function materialize(
   roster: readonly string[],
   options: PackOptions,
+  bindings: ProjectBuildBindings | undefined,
 ): { files: ImageFiles; packages: Map<string, number>; missing: string[] } {
   const files: ImageFiles = {}
   const packages = new Map<string, number>()
@@ -540,8 +638,14 @@ function materialize(
       // minus the workspace exclude table (no sources, no dist: the page
       // serves its own assets).
       const published = Array.isArray(manifest.files) ? publishedFilter(manifest.files) : undefined
-      collectTree(directory, files, prefix, relativePath =>
-        !workspaceExcluded(relativePath) && (published === undefined || published(relativePath)))
+      collectTree(
+        directory,
+        files,
+        prefix,
+        relativePath => !workspaceExcluded(relativePath) && (published === undefined || published(relativePath)),
+        false,
+        link => boundWorkspaceLib(directory, link, bindings),
+      )
     } else {
       collectTree(directory, files, prefix, relativePath => !excluded(relativePath))
     }
@@ -613,7 +717,8 @@ export function packVfsImage(options: PackOptions): PackResult {
     ...rosterOf(options.config),
     ...configTrees.filter(tree => tree.scanRoster === true).flatMap(tree => treeRosterOf(tree.directory)),
   ])]
-  const { files, packages, missing } = materialize(roster, options)
+  const bindings = projectBuildBindings(options.resolveFrom)
+  const { files, packages, missing } = materialize(roster, options, bindings)
 
   files[CONFIG_PATH] = encoder.encode(options.config)
   for (const tree of configTrees) collectTree(tree.directory, files, tree.mount, relativePath => !excluded(relativePath))

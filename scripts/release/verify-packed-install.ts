@@ -19,7 +19,7 @@
 
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { releaseFamily } from './families.ts'
@@ -42,6 +42,14 @@ function consumerEnvironment(consumerRoot: string): NodeJS.ProcessEnv {
   environment.DSH_HOME = resolve(consumerRoot, '.dsh')
   environment.DSH_AGENTS_HOME = resolve(consumerRoot, '.agents')
   environment.DSH_TELEMETRY_DISABLED = '1'
+  if (
+    process.platform === 'darwin'
+    && !/(?:^|\s)-undefined\s+dynamic_lookup(?:\s|$)/u.test(environment.LDFLAGS ?? '')
+  ) {
+    // Node resolves addon symbols when it loads a `.node` module.
+    // The macOS probe omits optional prebuilt addons, so CMake-built addons need dynamic symbol lookup.
+    environment.LDFLAGS = `${environment.LDFLAGS ?? ''} -undefined dynamic_lookup`.trim()
+  }
   return environment
 }
 
@@ -52,9 +60,12 @@ function consumerEnvironment(consumerRoot: string): NodeJS.ProcessEnv {
  * directory here can hold tarballs packed only to satisfy a cross-sequence
  * dependency, which no release order describes.
  * @param directories - absolute directories holding packed tarballs.
- * @returns Package name to tarball file URL, and the version each carries.
+ * @returns Package name to a local `file:` dependency specifier and its version.
  */
-function packedDependencies(directories: readonly string[]): Map<string, { url: string; version: string }> {
+function packedDependencies(
+  directories: readonly string[],
+  consumerRoot: string,
+): Map<string, { url: string; version: string }> {
   const dependencies = new Map<string, { url: string; version: string }>()
   for (const directory of directories) {
     const tarballs = readdirSync(directory).filter(name => name.endsWith('.tgz')).sort()
@@ -62,7 +73,11 @@ function packedDependencies(directories: readonly string[]): Map<string, { url: 
     for (const filename of tarballs) {
       const tarball = join(directory, filename)
       const { name, version } = packedIdentity(tarball)
-      dependencies.set(name, { url: pathToFileURL(tarball).href, version })
+      const localPath = relative(consumerRoot, tarball).split(sep).join('/')
+      const url = localPath !== '' && !isAbsolute(localPath) && !/[ %?#:]/u.test(localPath)
+        ? `file:${localPath}`
+        : pathToFileURL(tarball).href
+      dependencies.set(name, { url, version })
     }
   }
   return dependencies
@@ -86,12 +101,13 @@ function main(): void {
   }
 
   const root = process.cwd()
-  const packed = packedDependencies(values.from.map(directory => resolve(root, directory)))
-  const expected = packed.get(entry.packageName)
-  if (expected === undefined) throw new Error(`${entry.packageName} is not among the packed tarballs`)
-
+  const directories = values.from.map(directory => resolve(root, directory))
   const consumerRoot = mkdtempSync(join(tmpdir(), `dsh-packed-${family.id}-`))
   try {
+    const packed = packedDependencies(directories, consumerRoot)
+    const expected = packed.get(entry.packageName)
+    if (expected === undefined) throw new Error(`${entry.packageName} is not among the packed tarballs`)
+
     writeFileSync(join(consumerRoot, 'package.json'), `${JSON.stringify({
       name: `dsh-packed-install-${family.id}`,
       version: '0.0.0',

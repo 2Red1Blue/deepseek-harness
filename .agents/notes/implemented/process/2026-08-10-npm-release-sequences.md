@@ -111,7 +111,7 @@ The entity in this domain is a **release family**: a set of packages sharing one
 | `ReleaseFamily` | a family's identity: member discovery, version baseline, tag prefix, packed-payload rule, installed entry |
 | `ReleaseMember` | one publishable package: directory, name, version, manifest |
 | `publishOrder` | topological order over the sections npm installs plus peer declarations, ties broken by package name; a cycle among installed dependencies is reported rather than resolved arbitrarily, and a peer edge no order can honour is dropped and named |
-| `pack` | packs a whole family into one directory and records the upload order |
+| `pack` | packs a whole family into one directory and records the upload order; externally bound published outputs are materialized with the package-manager-selected files in an external distribution-only stage, with workspace ranges resolved from the manifest catalog before packing |
 | `verify` | the family's version baseline, the publish order it prints in full, and — when publishing — that the run comes from that family's tag and its members are publishable |
 | `verify-packed-install` | installs the tarballs of one or more pack directories into a throwaway consumer with an [owned npm cache](../bug-fix/2026-09-06-packed-install-private-npm-cache.md) and drives the installed executable |
 | `publish` | the three registry states above |

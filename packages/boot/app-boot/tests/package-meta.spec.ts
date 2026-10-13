@@ -1,6 +1,6 @@
 /** Plugin locale resources resolve independently of entry execution and package display fields. */
 
-import fs, { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import fs, { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -207,7 +207,7 @@ describe('plugin locale display metadata', () => {
     file(join(dir, 'outside.svg'), 'outside')
     file(join(dir, 'fallback.svg'), 'fallback')
     const meta = readPluginMeta('localized', parentURL)
-    expect(meta?.error).toContain(`${join(dir, 'display', 'manifest.json')}: icon must remain inside its manifest directory`)
+    expect(meta?.error).toContain(`${realpathSync(join(dir, 'display', 'manifest.json'))}: icon must remain inside its manifest directory`)
     expect(meta?.icon).toBeUndefined()
   })
 

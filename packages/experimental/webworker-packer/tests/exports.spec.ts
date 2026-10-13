@@ -1,5 +1,5 @@
 /** Runtime reachability ignores declaration-only export roots, not runtime requests. */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, type TestContext } from 'vitest'
@@ -27,6 +27,48 @@ function fixture(test: TestContext, face: unknown, source = 'export const value 
     config: `- id: subject\n  name: '${SUBJECT}'\n`,
     profile: 'export-check',
     workspaces: new Map([[SUBJECT, root]]),
+    resolveFrom: root,
+    entries: [],
+  }
+}
+
+function boundFixture(
+  test: TestContext,
+  linkTarget: 'bound' | 'outside' = 'bound',
+  declaredTarget: 'bound' | 'outside' = 'bound',
+): PackOptions {
+  const temporary = mkdtempSync(join(tmpdir(), 'dsh-image-bound-'))
+  test.onTestFinished(() => { rmSync(temporary, { recursive: true, force: true }) })
+  const root = join(temporary, 'source')
+  const packageRoot = join(root, 'packages/image-export-fixture')
+  const output = join(temporary, 'build')
+  const bound = join(output, 'artifacts/packages/image-export-fixture/lib')
+  const outside = join(temporary, 'outside/lib')
+  mkdirSync(packageRoot, { recursive: true })
+  mkdirSync(bound, { recursive: true })
+  mkdirSync(outside, { recursive: true })
+  mkdirSync(join(output, 'install-stage/node_modules'), { recursive: true })
+  symlinkSync(join(output, 'install-stage/node_modules'), join(root, 'node_modules'), 'dir')
+  symlinkSync(linkTarget === 'bound' ? bound : outside, join(packageRoot, 'lib'), 'dir')
+  writeFileSync(join(bound, 'index.js'), 'export const value = 7\n')
+  writeFileSync(join(outside, 'index.js'), 'export const value = 9\n')
+  writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({
+    name: SUBJECT,
+    type: 'module',
+    files: ['lib'],
+    exports: { '.': './lib/index.js' },
+  }))
+  writeFileSync(join(output, 'bindings.json'), JSON.stringify({
+    schema: 'ecosystem-build-bindings.v1',
+    source: realpathSync(root),
+    artifacts: {
+      'packages/image-export-fixture/lib': declaredTarget === 'bound' ? bound : outside,
+    },
+  }))
+  return {
+    config: `- id: subject\n  name: '${SUBJECT}'\n`,
+    profile: 'external-lib-check',
+    workspaces: new Map([[SUBJECT, packageRoot]]),
     resolveFrom: root,
     entries: [],
   }
@@ -66,4 +108,22 @@ it('rejects an assembly entry that requests a declaration-only export', (test) =
 it('rejects a missing runtime target beside a types condition', (test) => {
   const options = fixture(test, { types: './lib/index.d.ts', default: './lib/missing.js' })
   expect(() => packVfsImage(options)).toThrow('cannot resolve')
+})
+
+it('packs a package lib symlink only from its exact external project binding', (test) => {
+  const result = packVfsImage(boundFixture(test))
+  expect(result.missing).toEqual([])
+  const packed = new TextDecoder().decode(result.files[`node_modules/${SUBJECT}/lib/index.js`])
+  expect(packed).toContain('const value = 7')
+  expect(packed).not.toContain('value = 9')
+})
+
+it('rejects a package lib symlink that leaves its declared artifact directory', (test) => {
+  expect(() => packVfsImage(boundFixture(test, 'outside')))
+    .toThrow('workspace lib symlink does not match its external build binding')
+})
+
+it('rejects a project binding whose target leaves the project artifact root', (test) => {
+  expect(() => packVfsImage(boundFixture(test, 'outside', 'outside')))
+    .toThrow('workspace lib binding escapes project artifacts')
 })

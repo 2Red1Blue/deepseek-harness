@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MessageId, SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type {
-  MessageFeedbackItem, MessageFeedbackVersion,
+  MessageFeedbackItem, MessageFeedbackPutRequest, MessageFeedbackVersion,
 } from '@deepseek-ai/dsh-message-feedback/types'
 import { MessageFeedbackController } from '../src/client/controller.ts'
 
@@ -66,7 +66,7 @@ describe('MessageFeedbackController', () => {
   it('sends ifVersion null for a first rating and the observed version afterwards', async () => {
     const first = item({ version: version('v1') })
     const second = item({ version: version('v2'), rating: 'negative' })
-    mock.remote.messageFeedback.put.mockImplementation(request => Promise.resolve(ok({
+    mock.remote.messageFeedback.put.mockImplementation((request: MessageFeedbackPutRequest) => Promise.resolve(ok({
       ok: true,
       value: request.rating === 'positive' ? first : second,
     })))
@@ -75,9 +75,10 @@ describe('MessageFeedbackController', () => {
     expect(await controller.rate(MSG, 'positive')).toEqual({ ok: true })
     expect(await controller.rate(MSG, 'negative')).toEqual({ ok: true })
 
-    const puts = mock.remote.messageFeedback.put.mock.calls.map(([request]) => request)
-    expect(puts[0]).toMatchObject({ messageId: MSG, rating: 'positive', ifVersion: null })
-    expect(puts[1]).toMatchObject({ messageId: MSG, rating: 'negative', ifVersion: version('v1') })
+    expect(mock.remote.messageFeedback.put.mock.calls[0]?.[0])
+      .toMatchObject({ messageId: MSG, rating: 'positive', ifVersion: null })
+    expect(mock.remote.messageFeedback.put.mock.calls[1]?.[0])
+      .toMatchObject({ messageId: MSG, rating: 'negative', ifVersion: version('v1') })
     expect(controller.getSnapshot().items.get(MSG)).toEqual(second)
   })
 
@@ -87,10 +88,10 @@ describe('MessageFeedbackController', () => {
     await controller.rate(MSG, 'negative', { text: 'helpful', category: 'task-result' })
     await controller.rate(OTHER, 'negative')
 
-    const puts = mock.remote.messageFeedback.put.mock.calls.map(([request]) => request)
-    expect(puts[0]).toMatchObject({ note: 'helpful', category: 'task-result' })
-    expect(puts[1]).not.toHaveProperty('note')
-    expect(puts[1]).not.toHaveProperty('category')
+    expect(mock.remote.messageFeedback.put.mock.calls[0]?.[0])
+      .toMatchObject({ note: 'helpful', category: 'task-result' })
+    expect(mock.remote.messageFeedback.put.mock.calls[1]?.[0]).not.toHaveProperty('note')
+    expect(mock.remote.messageFeedback.put.mock.calls[1]?.[0]).not.toHaveProperty('category')
   })
 
   it('retract deletes a matching rating and ignores an opposite judgment', async () => {
@@ -190,9 +191,8 @@ describe('MessageFeedbackController', () => {
     await Promise.all([controller.rate(MSG, 'positive'), controller.rate(MSG, 'negative')])
 
     expect(overlapped).toBe(false)
-    const puts = mock.remote.messageFeedback.put.mock.calls.map(([request]) => request)
-    expect(puts[0]?.ifVersion).toBeNull()
-    expect(puts[1]?.ifVersion).toBe(version('v1'))
+    expect(mock.remote.messageFeedback.put.mock.calls[0]?.[0]).toMatchObject({ ifVersion: null })
+    expect(mock.remote.messageFeedback.put.mock.calls[1]?.[0]).toMatchObject({ ifVersion: version('v1') })
   })
 
   it('publishes an error status when the list read is rejected by the Host', async () => {

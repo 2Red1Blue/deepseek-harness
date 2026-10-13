@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -12,6 +12,28 @@ function fixture(): string {
   roots.push(root)
   return root
 }
+
+function externalFixture(): string {
+  const base = '/Volumes/Mac Storage/agent-ecosystem-build/tmp'
+  mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'dsh-clean-'))
+  roots.push(root)
+  return root
+}
+
+function internalFixture(): string {
+  const root = mkdtempSync(join('/private/tmp', 'dsh-clean-source-'))
+  roots.push(root)
+  return root
+}
+
+const hasExternalBuildVolume = (() => {
+  try {
+    return statSync('/Volumes/Mac Storage').dev !== statSync('/private/tmp').dev
+  } catch {
+    return false
+  }
+})()
 
 function write(path: string, content = ''): void {
   mkdirSync(dirname(path), { recursive: true })
@@ -97,5 +119,60 @@ describe('RepositoryCleaner', () => {
     await expect(new RepositoryCleaner(root).clean()).rejects.toThrow('outside repository')
 
     expect(existsSync(join(externalProject, 'lib/types/index.js'))).toBe(true)
+  })
+
+  it.skipIf(!hasExternalBuildVolume)('clears bound external outputs while preserving source links', async () => {
+    const root = internalFixture()
+    const externalRoot = externalFixture()
+    addProject(root, 'products/shell')
+    const externalLib = join(externalRoot, 'artifacts/products/shell/lib')
+    const sourceLib = join(root, 'products/shell/lib')
+    write(join(externalLib, 'types/index.js'))
+    symlinkSync(externalLib, sourceLib, 'dir')
+
+    const externalBuildInfo = join(externalRoot, 'artifacts/root.tsbuildinfo')
+    writeFileSync(externalBuildInfo, 'stale build state')
+    symlinkSync(externalBuildInfo, join(root, 'root.tsbuildinfo'))
+
+    const bindingsPath = join(externalRoot, 'bindings.json')
+    writeFileSync(bindingsPath, JSON.stringify({
+      schema: 'ecosystem-build-bindings.v1',
+      source: root,
+      artifacts: {
+        'products/shell/lib': externalLib,
+        'root.tsbuildinfo': externalBuildInfo,
+      },
+    }))
+
+    await new RepositoryCleaner(root, bindingsPath).clean()
+
+    expect(lstatSync(sourceLib).isSymbolicLink()).toBe(true)
+    expect(readdirSync(externalLib)).toEqual([])
+    expect(existsSync(join(root, 'products/shell/src/index.ts'))).toBe(true)
+    expect(lstatSync(join(root, 'root.tsbuildinfo')).isSymbolicLink()).toBe(true)
+    expect(readFileSync(externalBuildInfo, 'utf8')).toBe('')
+  })
+
+  it('refuses an unbound output symlink before deleting its target', async () => {
+    const root = fixture()
+    const externalRoot = fixture()
+    addProject(root, 'products/shell')
+    const externalLib = join(externalRoot, 'artifacts/products/shell/lib')
+    const externalOutput = join(externalLib, 'types/index.js')
+    const sourceLib = join(root, 'products/shell/lib')
+    write(externalOutput, 'keep')
+    symlinkSync(externalLib, sourceLib, 'dir')
+
+    const bindingsPath = join(externalRoot, 'bindings.json')
+    writeFileSync(bindingsPath, JSON.stringify({
+      schema: 'ecosystem-build-bindings.v1',
+      source: root,
+      artifacts: {},
+    }))
+
+    await expect(new RepositoryCleaner(root, bindingsPath).clean()).rejects.toThrow('unbound symlink output')
+
+    expect(lstatSync(sourceLib).isSymbolicLink()).toBe(true)
+    expect(readFileSync(externalOutput, 'utf8')).toBe('keep')
   })
 })

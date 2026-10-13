@@ -14,6 +14,7 @@ import { parseArgs } from 'node:util'
 import { pnpmInvocation } from '../pnpm-invocation.ts'
 import { releaseFamily, tarballName, type ReleaseFamily, type ReleaseMember } from './families.ts'
 import { isEntry, runConcurrent } from './process.ts'
+import { externalReleaseWorkspace, packReleaseMember } from './pack-member.ts'
 import { PUBLISH_ORDER_FILE, packedManifest, tarballFiles } from './tarball.ts'
 
 /** Where pack output lands when `--out` is omitted. */
@@ -49,13 +50,24 @@ async function packMembers(
   if (concurrency === 1) {
     const order: string[] = []
     for (const member of members) {
-      const invocation = pnpmInvocation(['--dir', member.directory, 'pack', '--pack-destination', destination])
-      await runConcurrent(invocation.command, invocation.args)
+      await packReleaseMember(process.cwd(), member, destination)
       order.push(validatePackedMember(family, member, destination))
     }
     return order
   }
   if (members.length === 0) return []
+  const externalWorkspace = externalReleaseWorkspace(process.cwd(), members)
+  if (externalWorkspace !== undefined) {
+    const invocation = pnpmInvocation([
+      // Built artifacts are fixed; packing has no workspace execution dependencies.
+      '--recursive', '--no-sort', `--workspace-concurrency=${String(concurrency)}`,
+      ...members.map(member => `--filter=${member.name}`), 'exec',
+      process.execPath, '--import', 'tsx/esm', resolve('scripts/release/pack-member.ts'),
+      '--root', process.cwd(), '--stage-root', externalWorkspace, '--out', destination,
+    ])
+    await runConcurrent(invocation.command, invocation.args, { cwd: externalWorkspace })
+    return members.map(member => validatePackedMember(family, member, destination))
+  }
   const invocation = pnpmInvocation([
     'pack',
     '--recursive',

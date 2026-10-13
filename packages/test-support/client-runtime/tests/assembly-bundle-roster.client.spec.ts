@@ -74,6 +74,30 @@ describe('bundleRoster on a scratch installation', () => {
   const scratch = new Scratch()
   afterAll(() => { rmSync(scratch.root, { recursive: true, force: true }) })
 
+  it('resolves a bundle layer package from its manifest without a node_modules self-dependency', () => {
+    const linked = new Scratch()
+    onTestFinished(() => { rmSync(linked.root, { recursive: true, force: true }) })
+    const app = join(linked.root, 'app')
+    const workspace = join(linked.root, 'workspace')
+    const base = join(workspace, 'base')
+    const web = join(workspace, 'web')
+    mkdirSync(join(app, 'node_modules', '@t'), { recursive: true })
+    mkdirSync(base, { recursive: true })
+    mkdirSync(web, { recursive: true })
+    writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'app' }))
+    writeFileSync(join(base, 'package.json'), JSON.stringify({ name: '@t/base', dsh: { bundle: { patch: './cordis.patch.yml' } } }))
+    writeFileSync(join(base, 'cordis.patch.yml'), "- insert:\n    - id: web\n      name: '@t/web'\n")
+    writeFileSync(join(web, 'package.json'), JSON.stringify({
+      name: '@t/web',
+      dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } },
+    }))
+    writeFileSync(join(web, 'cordis.patch.yml'), '- insert: []\n')
+    symlinkSync(base, join(app, 'node_modules', '@t', 'base'), 'junction')
+    symlinkSync(web, join(app, 'node_modules', '@t', 'web'), 'junction')
+
+    expect(bundleRoster(['@t/base', '@t/web'], join(app, 'package.json')).rows.map(row => row.name)).toEqual(['@t/web'])
+  })
+
   it('resolves a linked bundle dependency before an unrelated ancestor package', () => {
     const linked = new Scratch()
     onTestFinished(() => { rmSync(linked.root, { recursive: true, force: true }) })

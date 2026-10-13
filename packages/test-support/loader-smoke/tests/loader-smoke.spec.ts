@@ -1,7 +1,7 @@
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { LOADER_SMOKE_TEST_TIMEOUT_MS, runLoaderSmoke } from '@deepseek-ai/dsh-loader-smoke'
@@ -9,8 +9,16 @@ import { LOADER_SMOKE_TEST_TIMEOUT_MS, runLoaderSmoke } from '@deepseek-ai/dsh-l
 const configPath = '/tmp/fixture.cordis.yml'
 const tsconfigPath = fileURLToPath(new URL('../../../../tsconfig.json', import.meta.url))
 const fixture = (name: string): string => fileURLToPath(new URL(`./fixtures/${name}.ts`, import.meta.url))
-// macOS realpaths temp dirs into /private; TMPDIR may live under /var or /tmp.
-const canonicalTempPath = (path: string): string => path.replace(/^\/private(?=\/(?:var|tmp)\/)/, '')
+// Resolve the shared runner's short temp symlink without requiring the child path to still exist.
+const canonicalTempPath = (path: string): string => {
+  const canonical = (value: string): string => value.replace(/^\/private(?=\/(?:var|tmp)\/)/, '')
+  const logicalRoot = canonical(tmpdir())
+  const physicalRoot = canonical(realpathSync.native(tmpdir()))
+  const candidate = canonical(path)
+  if (candidate === logicalRoot) return physicalRoot
+  if (!candidate.startsWith(`${logicalRoot}${sep}`)) return candidate
+  return resolve(physicalRoot, relative(logicalRoot, candidate))
+}
 
 describe('runLoaderSmoke', () => {
   it('isolates the process, closes stdin, captures output, and removes the cwd', async () => {

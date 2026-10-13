@@ -8,11 +8,17 @@
  */
 
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ClientRemote, MessageId } from '@deepseek-ai/dsh-api-remotes/client'
+import type { MessageId, RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { FeedbackRecord } from '@deepseek-ai/dsh-command-feedback/types'
 import type {
+  MessageFeedbackDeleteRequest,
+  MessageFeedbackDeleteResult,
   MessageFeedbackItem,
+  MessageFeedbackListRequest,
+  MessageFeedbackListResult,
+  MessageFeedbackPutRequest,
+  MessageFeedbackPutResult,
   MessageFeedbackRating,
 } from '@deepseek-ai/dsh-message-feedback/types'
 
@@ -36,6 +42,13 @@ export interface MessageFeedbackActionFailure {
 
 /** Settled action shape rendered by the message-level controls. */
 export type MessageFeedbackActionResult = { ok: true } | MessageFeedbackActionFailure
+
+/** Typed operations the per-session controller consumes from the mounted Remote namespace. */
+interface MessageFeedbackRemote {
+  list(request: MessageFeedbackListRequest): Promise<RemoteResult<MessageFeedbackListResult>>
+  put(request: MessageFeedbackPutRequest): Promise<RemoteResult<MessageFeedbackPutResult>>
+  delete(request: MessageFeedbackDeleteRequest): Promise<RemoteResult<MessageFeedbackDeleteResult>>
+}
 
 // `Object.freeze` does not protect a Map: `set`/`delete` write internal slots,
 // not properties. Immutability here is by discipline instead — the view type is
@@ -98,7 +111,7 @@ export class MessageFeedbackController implements HostObservable<MessageFeedback
    * @param sessionId - Session owning every addressed assistant message.
    */
   constructor(
-    private readonly remote: ClientRemote['messageFeedback'],
+    private readonly remote: MessageFeedbackRemote,
     private readonly sessionId: SessionId,
   ) {}
 
@@ -193,7 +206,7 @@ export class MessageFeedbackController implements HostObservable<MessageFeedback
     entry: FeedbackRecord,
     observed: MessageFeedbackItem | undefined,
   ): Promise<MessageFeedbackActionResult> {
-    const carried = await this.remote.put({
+    const carried: RemoteResult<MessageFeedbackPutResult> = await this.remote.put({
       sessionId: this.sessionId,
       messageId,
       rating,
@@ -202,7 +215,7 @@ export class MessageFeedbackController implements HostObservable<MessageFeedback
       ifVersion: observed?.version ?? null,
     })
     if (!carried.ok) return carrierFailure(carried.error)
-    const result = carried.value
+    const result: MessageFeedbackPutResult = carried.value
     if (result.ok) {
       this.commit(messageId, result.value)
       return OK
@@ -216,13 +229,13 @@ export class MessageFeedbackController implements HostObservable<MessageFeedback
     messageId: MessageId,
     observed: MessageFeedbackItem,
   ): Promise<MessageFeedbackActionResult> {
-    const carried = await this.remote.delete({
+    const carried: RemoteResult<MessageFeedbackDeleteResult> = await this.remote.delete({
       sessionId: this.sessionId,
       messageId,
       ifVersion: observed.version,
     })
     if (!carried.ok) return carrierFailure(carried.error)
-    const result = carried.value
+    const result: MessageFeedbackDeleteResult = carried.value
     if (result.ok) {
       this.commit(messageId, null)
       return OK
@@ -239,13 +252,13 @@ export class MessageFeedbackController implements HostObservable<MessageFeedback
 
   /** Fetch the whole sidecar and publish it as the seeded view. */
   private async load(): Promise<MessageFeedbackActionResult> {
-    const carried = await this.remote.list({ sessionId: this.sessionId })
+    const carried: RemoteResult<MessageFeedbackListResult> = await this.remote.list({ sessionId: this.sessionId })
     if (this.disposed) return OK
     if (!carried.ok) {
       this.publish({ status: 'error', items: this.view.items, error: carried.error.message })
       return carrierFailure(carried.error)
     }
-    const result = carried.value
+    const result: MessageFeedbackListResult = carried.value
     if (!result.ok) {
       this.publish({ status: 'error', items: this.view.items, error: describe(result.error.code) })
       return fail(result.error.code)

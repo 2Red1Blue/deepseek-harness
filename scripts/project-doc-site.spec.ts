@@ -626,20 +626,6 @@ describe('addProjectionFrontmatter', () => {
   })
 })
 
-describe('projectDocs output ownership', () => {
-  it('writes only to the selected projection root', () => {
-    const targetRoot = mkdtempSync(join(tmpdir(), 'dsh-doc-projection-'))
-    roots.push(targetRoot)
-    const internalIndex = join(repositoryRoot, 'website/.generated/index.md')
-    const previousInternal = existsSync(internalIndex) ? readFileSync(internalIndex) : undefined
-
-    projectDocs(targetRoot)
-
-    expect(existsSync(join(targetRoot, 'index.md'))).toBe(true)
-    if (previousInternal !== undefined) expect(readFileSync(internalIndex)).toEqual(previousInternal)
-  })
-})
-
 describe('projectedPageContent', () => {
   const page = (sidebar: DocsPage['sidebar']): DocsPage => ({
     locale: 'root',

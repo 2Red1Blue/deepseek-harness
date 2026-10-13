@@ -81,7 +81,7 @@ export function compileReferencedProjects(
 export function buildLibraryArtifacts(root: string, hostOnly: boolean, mode: CompilationMode = 'checked'): void {
   compileReferencedProjects(root, 'host', mode)
   runPnpmCommand(root, ['exec', 'tsdown', '--config-loader', 'native', '--env.DSH_BUILD_FACE', 'host'])
-  runPnpmCommand(root, ['--filter', '@deepseek-ai/dsh-desktop', 'run', 'bundle'])
+  runPnpmCommand(root, ['--dir', 'apps/desktop', 'run', 'bundle'])
   if (hostOnly) return
   compileReferencedProjects(root, 'client', mode)
   runPnpmCommand(root, ['exec', 'tsdown', '--config-loader', 'native', '--env.DSH_BUILD_FACE', 'client'])

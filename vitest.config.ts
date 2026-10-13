@@ -1,8 +1,11 @@
 import { spawnSync } from 'node:child_process'
+import { realpathSync } from 'node:fs'
+import { isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import tsconfigPaths from 'vite-tsconfig-paths'
 import { resolvePwshPath } from './packages/shell/pwsh-local/src/resolve.ts'
 import { defineConfig } from 'vitest/config'
+import { searchForWorkspaceRoot } from 'vite'
 import { standardDecoratorPlugin, vitestExecArgv } from './vitest.shared.ts'
 import { COVERAGE_EXEMPT_ENV, coverageExemptHeavySuites } from './scripts/coverage-exempt.ts'
 import { COVERAGE_PARTITION_MODE_ENV, COVERAGE_TEST_TIMEOUT_ENV, coverageTestTimeoutOptions } from './scripts/coverage-partitions.ts'
@@ -12,6 +15,16 @@ import { COVERAGE_PARTITION_MODE_ENV, COVERAGE_TEST_TIMEOUT_ENV, coverageTestTim
 // threshold ERRORs name only the file. Absolute path because istanbul-reports
 // require()s custom reporters (which is also why the reporter is CJS).
 const uncoveredLocationsReporter = fileURLToPath(new URL('./scripts/coverage-uncovered-locations.cjs', import.meta.url))
+
+const repositoryRoot = fileURLToPath(new URL('.', import.meta.url))
+const workspaceRoot = searchForWorkspaceRoot(repositoryRoot)
+const realNodeModules = realpathSync(join(repositoryRoot, 'node_modules'))
+const nodeModulesRelativeToWorkspace = relative(workspaceRoot, realNodeModules)
+const vitestServerFsAllow = nodeModulesRelativeToWorkspace === '..'
+  || nodeModulesRelativeToWorkspace.startsWith(`..${sep}`)
+  || isAbsolute(nodeModulesRelativeToWorkspace)
+  ? [workspaceRoot, realNodeModules]
+  : [workspaceRoot]
 
 // Resolution facade shared by every plugin instance below: tsconfig.base.json
 // has no include, which vite-tsconfig-paths treats as match-all, so its paths
@@ -175,6 +188,7 @@ const claudeCodeTestingAliases = {
 export default defineConfig({
   plugins: [pathsPlugin(), standardDecoratorPlugin()],
   resolve: { alias: claudeCodeTestingAliases },
+  server: { fs: { allow: vitestServerFsAllow } },
   test: {
     setupFiles: ['./scripts/test-proxy-environment.ts', './scripts/test-dom-environment.ts'],
     // .tsx: client component specs (jsdom via per-file @vitest-environment pragma).
@@ -186,6 +200,7 @@ export default defineConfig({
       {
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         resolve: { alias: claudeCodeTestingAliases },
+        server: { fs: { allow: vitestServerFsAllow } },
         test: {
           name: 'thread-safe',
           execArgv: vitestExecArgv,
@@ -206,6 +221,7 @@ export default defineConfig({
       {
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         resolve: { alias: claudeCodeTestingAliases },
+        server: { fs: { allow: vitestServerFsAllow } },
         test: {
           name: 'process-bound',
           execArgv: vitestExecArgv,

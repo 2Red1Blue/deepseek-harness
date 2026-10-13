@@ -1,4 +1,5 @@
-import { lstat, readdir, realpath, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { lstat, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
@@ -8,6 +9,13 @@ const knownOrphanEntries = new Set(['node_modules', 'lib', '.typecheck'])
 
 function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && Object.values(value).every(entry => typeof entry === 'string')
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -43,23 +51,171 @@ function parseConfig(configPath: string): ts.ParsedCommandLine {
   return parsed
 }
 
-/** Plans and removes repository-owned build output without crossing the repository boundary. */
+interface ExternalBuildBindings {
+  schema: 'ecosystem-build-bindings.v1'
+  source: string
+  artifacts: Record<string, string>
+}
+
+function defaultBindingsPath(root: string): string {
+  const volume = process.env.ECO_BUILD_VOLUME ?? '/Volumes/Mac Storage'
+  const identity = `${basename(root)}-${createHash('sha256').update(root).digest('hex').slice(0, 12)}`
+  return join(volume, 'agent-ecosystem-build', 'projects', identity, 'bindings.json')
+}
+
+/** Clears repository build output and exact external bindings without removing their source links. */
 export class RepositoryCleaner {
   private readonly root: string
+  private readonly bindingsPath: string
+  private readonly validatedExternalTargets = new Map<string, string>()
 
-  constructor(root: string) {
+  constructor(root: string, bindingsPath?: string) {
     this.root = resolve(root)
+    this.bindingsPath = bindingsPath ?? defaultBindingsPath(this.root)
   }
 
   /**
-   * Remove generated build state and package directories containing only known residue.
-   * @returns Repository-relative paths that were removed.
+   * Clear generated build state and remove package directories containing only known residue.
+   * Bound external output links remain in place so later builds keep writing to their targets.
+   * @returns Repository-relative paths that were cleared or removed.
    */
   async clean(): Promise<string[]> {
     const targets = await this.plan()
-    // Planning validates every target first, so an unsafe orphan prevents all deletion.
-    for (const target of targets) await rm(target, { recursive: true, force: true })
+    // Validate every symlink before clearing any output so an unsafe link prevents partial cleanup.
+    for (const target of targets) {
+      const externalTarget = await this.externalTargetFor(target)
+      if (externalTarget !== undefined) this.validatedExternalTargets.set(target, externalTarget)
+    }
+    for (const target of targets) await this.removeTarget(target)
     return targets.map(target => repositoryPath(this.root, target))
+  }
+
+  private async removeTarget(target: string): Promise<void> {
+    const info = await lstat(target)
+    if (!info.isSymbolicLink()) {
+      if (this.validatedExternalTargets.has(target)) {
+        throw new Error(`clean: symlink output changed during cleanup: ${repositoryPath(this.root, target)}`)
+      }
+      await rm(target, { recursive: true, force: true })
+      return
+    }
+
+    const expectedTarget = this.validatedExternalTargets.get(target)
+    if (expectedTarget === undefined) throw new Error(`clean: refusing to remove unbound symlink output: ${target}`)
+    const targetInfo = await stat(expectedTarget)
+    if (targetInfo.isDirectory()) {
+      for (const name of await readdir(expectedTarget)) {
+        await rm(join(expectedTarget, name), { recursive: true, force: true })
+      }
+      return
+    }
+    if (!targetInfo.isFile()) {
+      throw new Error(`clean: refusing to clear non-file external output: ${repositoryPath(this.root, target)}`)
+    }
+    // Truncate through the source link so the external target and the link stay usable.
+    await writeFile(expectedTarget, '')
+  }
+
+  private async externalTargetFor(target: string): Promise<string | undefined> {
+    const info = await lstat(target)
+    if (!info.isSymbolicLink()) return undefined
+    const relativePath = repositoryPath(this.root, target)
+    const bindings = await this.readBindings()
+    const declaredTarget = bindings.artifacts[relativePath]
+    if (typeof declaredTarget !== 'string') {
+      throw new Error(`clean: refusing to remove unbound symlink output: ${relativePath}`)
+    }
+
+    const externalRoot = dirname(this.bindingsPath)
+    const expectedTarget = resolve(declaredTarget)
+    const externalRelative = relative(externalRoot, expectedTarget)
+    if (externalRelative === '' || externalRelative === '..' || externalRelative.startsWith(`..${sep}`) || isAbsolute(externalRelative)) {
+      throw new Error(`clean: refusing external binding outside project output: ${relativePath}`)
+    }
+
+    const sourceRoot = await realpath(this.root)
+    if (bindings.source !== sourceRoot) {
+      throw new Error(`clean: external bindings source does not match repository: ${this.bindingsPath}`)
+    }
+    const volume = process.env.ECO_BUILD_VOLUME ?? '/Volumes/Mac Storage'
+    const [
+      sourceStat,
+      volumeStat,
+      canonicalVolume,
+      canonicalExternalRoot,
+      canonicalTarget,
+      canonicalExpected,
+      expectedInfo,
+      targetInfo,
+    ] = await Promise.all([
+      stat(sourceRoot),
+      stat(volume),
+      realpath(volume),
+      realpath(externalRoot),
+      realpath(target),
+      realpath(expectedTarget),
+      lstat(expectedTarget),
+      stat(target),
+    ])
+    if (sourceStat.dev === volumeStat.dev) {
+      throw new Error(`clean: external build volume is not separate from the repository: ${volume}`)
+    }
+    const projectRelative = relative(canonicalVolume, canonicalExternalRoot)
+    if (projectRelative === '..' || projectRelative.startsWith(`..${sep}`) || isAbsolute(projectRelative)) {
+      throw new Error(`clean: external bindings are outside the build volume: ${this.bindingsPath}`)
+    }
+    const targetRelative = relative(canonicalExternalRoot, canonicalExpected)
+    if (targetRelative === '' || targetRelative === '..' || targetRelative.startsWith(`..${sep}`) || isAbsolute(targetRelative)) {
+      throw new Error(`clean: external target resolves outside project output: ${relativePath}`)
+    }
+    if (canonicalTarget !== canonicalExpected) {
+      throw new Error(`clean: external binding target changed: ${relativePath}`)
+    }
+    if (expectedInfo.isSymbolicLink() || expectedInfo.dev !== volumeStat.dev || targetInfo.dev !== volumeStat.dev) {
+      throw new Error(`clean: external output is not a direct entry on the build volume: ${relativePath}`)
+    }
+    if ((targetInfo.isDirectory() && !expectedInfo.isDirectory()) || (targetInfo.isFile() && !expectedInfo.isFile())) {
+      throw new Error(`clean: external output type does not match its source link: ${relativePath}`)
+    }
+    return expectedTarget
+  }
+
+  private async readBindings(): Promise<ExternalBuildBindings> {
+    let manifestInfo
+    try {
+      manifestInfo = await lstat(this.bindingsPath)
+    } catch (error) {
+      if (isMissing(error)) {
+        throw new Error(`clean: external bindings are unavailable for symlink output: ${this.bindingsPath}`)
+      }
+      throw error
+    }
+    if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink()) {
+      throw new Error(`clean: external bindings must be a regular file: ${this.bindingsPath}`)
+    }
+    let raw: unknown
+    try {
+      raw = JSON.parse(await readFile(this.bindingsPath, 'utf8'))
+    } catch (error) {
+      if (isMissing(error)) {
+        throw new Error(`clean: external bindings are unavailable for symlink output: ${this.bindingsPath}`)
+      }
+      throw error
+    }
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      throw new Error(`clean: invalid external bindings: ${this.bindingsPath}`)
+    }
+    const parsed = raw as Record<string, unknown>
+    if (parsed.schema !== 'ecosystem-build-bindings.v1'
+      || typeof parsed.source !== 'string'
+      || !isStringRecord(parsed.artifacts)) {
+      throw new Error(`clean: invalid external bindings: ${this.bindingsPath}`)
+    }
+    return {
+      schema: 'ecosystem-build-bindings.v1',
+      source: parsed.source,
+      artifacts: parsed.artifacts,
+    }
   }
 
   private async plan(): Promise<string[]> {
@@ -73,7 +229,9 @@ export class RepositoryCleaner {
     // These checks cover legacy root-level incremental state emitted by older configs.
     await this.addIfPresent(targets, join(this.root, '.typecheck'), canonicalRoot)
     for (const entry of await readdir(this.root, { withFileTypes: true })) {
-      if (entry.isFile() && entry.name.endsWith('.tsbuildinfo')) targets.add(join(this.root, entry.name))
+      if ((entry.isFile() || entry.isSymbolicLink()) && entry.name.endsWith('.tsbuildinfo')) {
+        targets.add(join(this.root, entry.name))
+      }
     }
     await this.addIfPresent(
       targets,

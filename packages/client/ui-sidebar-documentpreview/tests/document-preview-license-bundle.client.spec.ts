@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
@@ -32,32 +32,58 @@ function run(command: string, args: string[], cwd: string, timeout: number): str
   return result.stdout
 }
 
-function runPnpm(args: string[], cwd: string, timeout: number): string {
-  const entrypoint = process.env.npm_execpath
-  if (entrypoint === undefined || entrypoint === '') {
-    if (process.platform === 'win32') throw new Error('npm_execpath is required to run pnpm on Windows')
-    return run('pnpm', args, cwd, timeout)
-  }
-  return /\.[cm]?js$/iu.test(entrypoint)
-    ? run(process.execPath, [entrypoint, ...args], cwd, timeout)
-    : run(entrypoint, args, cwd, timeout)
-}
-
 describe('published document preview licenses', () => {
-  it.skipIf(!existsSync(bundlePath))('keeps bundled licenses in the packed lazy chunks', ({ task }) => {
+  it.skipIf(!existsSync(bundlePath))('keeps bundled licenses in the packed lazy chunks', async ({ task }) => {
     expect(existsSync(pdfChunkPath)).toBe(true)
     const output = mkdtempSync(join(tmpdir(), 'dsh-document-preview-pack-'))
     try {
-      const packed = JSON.parse(runPnpm([
-        'pack', '--json', '--pack-destination', output,
-      ], packageRoot, task.timeout)) as { filename: string; files: { path: string }[] }
-      expect(packed.files.map(file => file.path)).toContain('lib/client.js')
-      expect(packed.files.map(file => file.path)).toContain('lib/client.pdf.js')
-      expect(packed.files.map(file => file.path)).toContain('lib/client.frontmatter-fields.js')
-      expect(packed.files.some(file => file.path.endsWith('pdfjs-NOTICES.txt'))).toBe(false)
+      const repositoryRoot = resolve(packageRoot, '../../..')
+      const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as Record<string, unknown>
+      expect(typeof manifest.name).toBe('string')
+      expect(typeof manifest.version).toBe('string')
+      const member = {
+        directory: relative(repositoryRoot, packageRoot).replaceAll('\\', '/'),
+        name: manifest.name as string,
+        version: manifest.version as string,
+      }
+      const packScript = resolve(repositoryRoot, 'scripts/release/pack-member.ts')
+      const packResult = run(process.execPath, [
+        '--import', 'tsx/esm', packScript,
+        '--member', member.directory,
+        '--out', output,
+      ], repositoryRoot, task.timeout)
+      const filename = packResult.trim().split(/\r?\n/u).at(-1)
+      expect(filename).toBeTruthy()
+      const tarball = resolve(output, filename!)
+      const packedFiles = run('tar', ['-tzf', tarball], output, task.timeout)
+        .trim()
+        .split(/\r?\n/u)
+        .map(path => path.replace(/^package\//u, ''))
+      expect(packedFiles).toContain('lib/client.js')
+      expect(packedFiles).toContain('lib/client.pdf.js')
+      expect(packedFiles).toContain('lib/client.frontmatter-fields.js')
+      expect(packedFiles.some(path => path.endsWith('pdfjs-NOTICES.txt'))).toBe(false)
+      expect(packedFiles.some(path => path.startsWith('src/'))).toBe(false)
+      expect(packedFiles.some(path => path.split('/').includes('.git') || path.split('/').includes('node_modules'))).toBe(false)
+      const packedManifest = JSON.parse(run('tar', ['-xOf', tarball, 'package/package.json'], output, task.timeout)) as {
+        dependencies?: Record<string, string>
+        devDependencies?: Record<string, string>
+        optionalDependencies?: Record<string, string>
+        peerDependencies?: Record<string, string>
+      }
+      const schemastery = JSON.parse(readFileSync(resolve(repositoryRoot, 'vendor/schemastery/package.json'), 'utf8')) as { version: string }
+      expect(packedManifest.dependencies?.['@deepseek-ai/schemastery']).toBe(`~${schemastery.version}`)
+      for (const dependencies of [
+        packedManifest.dependencies,
+        packedManifest.devDependencies,
+        packedManifest.optionalDependencies,
+        packedManifest.peerDependencies,
+      ]) {
+        expect(Object.values(dependencies ?? {}).some(range => range.startsWith('workspace:'))).toBe(false)
+      }
 
-      const client = run('tar', ['-xOf', resolve(packageRoot, packed.filename), 'package/lib/client.js'], packageRoot, task.timeout)
-      const pdf = run('tar', ['-xOf', resolve(packageRoot, packed.filename), 'package/lib/client.pdf.js'], packageRoot, task.timeout)
+      const client = run('tar', ['-xOf', tarball, 'package/lib/client.js'], output, task.timeout)
+      const pdf = run('tar', ['-xOf', tarball, 'package/lib/client.pdf.js'], output, task.timeout)
       expect([...client.matchAll(/require\.async\("(\.\/client[^"/]*\.js)"\)/gu)].map(match => match[1]))
         .toEqual(['./client.frontmatter-fields.js', './client.pdf.js', './client.excel.js'])
       expect(client).not.toMatch(/\brequire\("\.\/client[^"/]*\.js"\)/u)
@@ -66,7 +92,7 @@ describe('published document preview licenses', () => {
       expect(client).not.toContain('//! Bundled PDF.js license notices')
       expect(client).not.toContain('/pdfjs-dist/')
       expect(pdf).toContain('//! Bundled PDF.js license notices')
-      const excel = run('tar', ['-xOf', resolve(packageRoot, packed.filename), 'package/lib/client.excel.js'], packageRoot, task.timeout)
+      const excel = run('tar', ['-xOf', tarball, 'package/lib/client.excel.js'], output, task.timeout)
       expect(excel).not.toMatch(/\brequire\("\.\/client[^"/]*\.js"\)/u)
       expect(client).not.toContain('FortuneSheet')
       expect(excel).toContain('//! Bundled spreadsheet license notices')
@@ -77,7 +103,7 @@ describe('published document preview licenses', () => {
         const license = readFileSync(join(root, 'LICENSE'), 'utf8').trimEnd()
         expect(excel).toContain(license.split('\n').map(line => `// ${line}`).join('\n'))
       }
-      const frontmatter = run('tar', ['-xOf', resolve(packageRoot, packed.filename), 'package/lib/client.frontmatter-fields.js'], packageRoot, task.timeout)
+      const frontmatter = run('tar', ['-xOf', tarball, 'package/lib/client.frontmatter-fields.js'], output, task.timeout)
       expect(frontmatter).not.toMatch(/\brequire\("\.\/client[^"/]*\.js"\)/u)
       let frontmatterInitialized = false
       runInNewContext(frontmatter, { window: { __ModuleLoader__: { load: (registration: {
@@ -113,5 +139,5 @@ describe('published document preview licenses', () => {
     } finally {
       rmSync(output, { recursive: true, force: true })
     }
-  })
+  }, 60_000)
 })

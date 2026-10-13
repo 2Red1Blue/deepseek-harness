@@ -1,6 +1,7 @@
 /** Identity-stable process permission catalog shared by both selection surfaces. */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { PermissionCatalog } from '@deepseek-ai/dsh-permission-presets/client'
@@ -131,12 +132,12 @@ export class PermissionCatalogDirectory {
   private startRead(generationId: number): void {
     const epoch = ++this.epoch
     this.failure = new Error('permission catalog has no complete value')
-    const operation = this.ctx.remote.permissionPresets.catalog()
-      .then((result) => {
-        if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
-        if (!this.accepts(epoch, generationId)) return
-        this.store.set({ value: result.value })
-      })
+    const read: Promise<RemoteResult<PermissionCatalog>> = this.ctx.remote.permissionPresets.catalog()
+    const operation = read.then((result: RemoteResult<PermissionCatalog>) => {
+      if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+      if (!this.accepts(epoch, generationId)) return
+      this.store.set({ value: result.value })
+    })
       .catch((error: unknown) => {
         if (!this.accepts(epoch, generationId)) return
         this.failure = error instanceof Error ? error : new Error(String(error))
