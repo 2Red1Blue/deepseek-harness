@@ -29,6 +29,9 @@
 /deepseek-ai-dsh-subagent-codex/use-this-package/what-you-get:
   en: 4b271f17f16fb162
   zh: 154c909023f1366b
+/deepseek-ai-dsh-subagent-codex/use-this-package/closed-input-for-program-consumers:
+  en: 4a5324aa4ea6f683
+  zh: b633c197810c5e30
 /deepseek-ai-dsh-subagent-codex/use-this-package/failure-and-recovery:
   en: 4ffe0312c5a8f722
   zh: 532a1997e9ae825b
@@ -39,8 +42,8 @@
   en: 40315dca80a4e688
   zh: 6b12db5e1037db98
 /deepseek-ai-dsh-subagent-codex/understand-the-implementation/source-map:
-  en: 36647129f061610f
-  zh: 42947c700d1d9202
+  en: c2726afbedc5af20
+  zh: 895b5c7715404e21
 /deepseek-ai-dsh-subagent-codex/understand-the-implementation/run-flow:
   en: 19b10ff145644564
   zh: c015d530f1bd227e
@@ -78,5 +81,5 @@
   en: 040fff3c01eae51e
   zh: e37cf7cc47e9a08c
 /deepseek-ai-dsh-subagent-codex/known-limitations-and-deferred-work/dev-note:
-  en: cacc98025ed8913e
-  zh: e7673a3087ec0c62
+  en: 58b064be09f1b3dd
+  zh: 72675fd31340a59a

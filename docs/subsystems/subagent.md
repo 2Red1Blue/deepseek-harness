@@ -74,6 +74,8 @@ interface SubagentStartRequest {
   readonly label?: string
   /** Content delivered as the child's user message. */
   readonly prompt: ContentBlock[]
+  /** Require a provider-qualified closed input boundary; unsupported providers reject before start. */
+  readonly controlledReadSet?: SubagentControlledReadSetRequest
   /**
    * The spawning agent. Its effective directory supplies the default cwd;
    * in-process children retain its origin, lineage, and delegation depth.
@@ -245,6 +247,8 @@ SubagentResult is available to program consumers. The activation registry retain
  * The terminal outcome of a subagent run, resolved by {@link SubagentRun.result}.
  */
 interface SubagentResult {
+  /** Present only when the opted-in native owner proved and sealed the requested boundary. */
+  readonly controlledReadSet?: SubagentControlledReadSetProof
   /**
    * The child's final assistant output is the content of its last non-empty
    * assistant message. Empty-content messages, including usage-only messages,
@@ -352,6 +356,9 @@ interface SubagentProvider {
    * is detached immutable data and requires `agentOptions` support.
    */
   readonly agentRouteDefaults?: Readonly<{ provider: string; model: string }>
+  /** Inspect an actual zero-turn native boundary at this exact explicit execution-world cwd. */
+  inspectControlledReadSetBoundary?(request: Readonly<{ cwd: string; signal: AbortSignal;
+    qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[] }>): Promise<SubagentControlledReadSetBoundary>
   /**
    * Establish one external execution and return its owned handle.
    * The service has already validated that every requested start-time
@@ -399,6 +406,8 @@ type SubagentDescendantListEntry = SubagentListEntry & {
 ```
 
 
+
+Program consumers can request a qualified native input observation through `controlledReadSet`. A supporting provider exposes `inspectControlledReadSetBoundary`; inspection starts no model turn. The request binds its sole text task, prior inspection and deployment-qualified management templates. A completed result may contain `controlledReadSet` proof data; absence is not complete observation. Consumers store full snapshots privately and present metadata separately. The [native Codex provider](../../packages/subagent/subagent-codex/README.md#closed-input-for-program-consumers) defines the supported version, input checks and limitations.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 

@@ -138,6 +138,8 @@ export function codexAppServerArgv(): string[] {
 
 /** Fully resolved inputs for one Codex app-server run. */
 export interface CodexRunSpec {
+  readonly providerName?: string
+  readonly readInstructionSource?: (path: string) => Promise<Uint8Array>
   /** Selected child working directory, also supplied to `thread/start`. */
   readonly cwd: string
   /** Profile-selected native model; omitted to preserve Codex settings. */
@@ -226,6 +228,10 @@ export async function startCodexRun(
   request: SubagentStartRequest,
   spec: CodexRunSpec,
 ): Promise<SubagentRun> {
+  if (request.controlledReadSet !== undefined) {
+    const { startControlledCodexRun } = await import('./controlled.ts')
+    return await startControlledCodexRun(request, spec)
+  }
   const texts = textTask(request.prompt)
   if (request.signal.aborted) {
     throw new Error('subagent-codex: request was aborted before app-server startup')

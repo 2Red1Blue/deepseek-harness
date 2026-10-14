@@ -76,6 +76,14 @@ The tool returns a child id after accepting the task and sends its result to the
 
 The completion notice contains the final Codex answer, or the stop reason and optional safe diagnostic. The parent Session also retains the external task identity and complete terminal result independently of the notice; no local child Session is created. Product reasoning, tool activity, raw stderr, and workspace diffs do not enter the parent Session.
 
+### Closed input for program consumers
+
+Program consumers may inspect a configured provider with `inspectControlledReadSetBoundary` and pass `controlledReadSet` through the existing `startActivation` request. This opt-in requires the exact Codex 0.162.1 payload, one text block, explicit model and cwd, and a deployment-qualified set of native management template hashes. Inspection creates and releases an ephemeral thread without a model turn. The actual turn rechecks the inspected digest, records all client-visible research and administrative inputs, and returns a sealed proof only after its item stream and final configuration checks close.
+
+This mode disables additional reading capabilities and MCP tools, enforces native read-only execution without network access, and rejects unknown inputs, tools, management templates, malformed or incomplete observations, and configuration drift. Native authentication remains in place; changing global settings or copying credentials is unnecessary. The proof is program data: consumers persist its complete input snapshots privately and expose metadata separately. It proves client-visible input and reading observations, not cognitive attention or server-side instructions unavailable to the client.
+
+The ordinary delegation tool and omitted `controlledReadSet` keep their existing behavior. Full supplied material adds native input tokens; zero-turn inspection adds no generation tokens. Each execution still uses a fresh ephemeral thread and independent native cache. The [Subagent subsystem](../../../docs/subsystems/subagent.md) owns the public request, provider and result types.
+
 ### Failure and recovery
 
 An install that omits optional dependencies, uses an unsupported platform, or loses the selected payload leaves the provider dormant and fails the first delegation at `initialize` with a safe `unknown` category and any observed process outcome; there is no host-CLI fallback. Raw wrapper text stays on Host stderr. A cancelled run settles as `aborted`.
@@ -103,6 +111,7 @@ This section explains how the provider drives a real Codex app-server and where 
 | [`src/index.ts`](src/index.ts) | Plugin entry: config schema, provider registration |
 | [`src/run.ts`](src/run.ts) | The run lifecycle, turn execution, result selection, and diagnostics |
 | [`src/wire.ts`](src/wire.ts) | The minimal app-server JSON-RPC wire implementation |
+| [`src/controlled.ts`](src/controlled.ts) | Optional complete input observation and native management qualification |
 | [`cordis.patch.yml`](cordis.patch.yml) | The Profile layer that registers the provider and contributes preset delegation tools |
 
 ### Run flow

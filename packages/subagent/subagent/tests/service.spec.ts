@@ -98,6 +98,16 @@ async function start(subagents: SubagentRuntime, provider: string, request: Suba
 }
 
 describe('SubagentRuntime', () => {
+  it('refuses a requested controlled boundary before starting an unsupported provider', async () => {
+    const { subagents } = await service()
+    const provider = new StubProvider('uncontrolled-native')
+    subagents.registerProvider(provider)
+    await expect(start(subagents, provider.name, baseRequest({ controlledReadSet: {
+      mode: 'closed-input', expectedBoundaryRef: `sha256:${'a'.repeat(64)}`, expectedInputHash: `sha256:${'b'.repeat(64)}`,
+      qualifiedManagementInputHashes: [{ role: 'developer', templateHash: `sha256:${'c'.repeat(64)}` }],
+    } }))).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' })
+    expect(provider.startCount).toBe(0)
+  })
   it('has no owned child work before the Agent service is mounted', async () => {
     const { subagents } = await service(false)
     await expect(subagents.waitForChildren(fakeParent())).resolves.toBe(false)

@@ -74,6 +74,8 @@ interface SubagentStartRequest {
   readonly label?: string
   /** Content delivered as the child's user message. */
   readonly prompt: ContentBlock[]
+  /** Require a provider-qualified closed input boundary; unsupported providers reject before start. */
+  readonly controlledReadSet?: SubagentControlledReadSetRequest
   /**
    * The spawning agent. Its effective directory supplies the default cwd;
    * in-process children retain its origin, lineage, and delegation depth.
@@ -245,6 +247,8 @@ SubagentResult 供程序消费方读取。activation 注册表保留外部后端
  * The terminal outcome of a subagent run, resolved by {@link SubagentRun.result}.
  */
 interface SubagentResult {
+  /** Present only when the opted-in native owner proved and sealed the requested boundary. */
+  readonly controlledReadSet?: SubagentControlledReadSetProof
   /**
    * The child's final assistant output is the content of its last non-empty
    * assistant message. Empty-content messages, including usage-only messages,
@@ -352,6 +356,9 @@ interface SubagentProvider {
    * is detached immutable data and requires `agentOptions` support.
    */
   readonly agentRouteDefaults?: Readonly<{ provider: string; model: string }>
+  /** Inspect an actual zero-turn native boundary at this exact explicit execution-world cwd. */
+  inspectControlledReadSetBoundary?(request: Readonly<{ cwd: string; signal: AbortSignal;
+    qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[] }>): Promise<SubagentControlledReadSetBoundary>
   /**
    * Establish one external execution and return its owned handle.
    * The service has already validated that every requested start-time
@@ -401,6 +408,8 @@ type SubagentDescendantListEntry = SubagentListEntry & {
 
 <a id="the-terminal-result-subagentresult"></a>
 
+
+程序调用方可通过 `controlledReadSet` 请求已取得资格的原生输入观测。支持该模式的提供方公开 `inspectControlledReadSetBoundary`，入口检查不启动模型轮次。请求绑定唯一文本任务、既有检查和部署中已核实的管理模板。已完成结果可含 `controlledReadSet` 证明；缺失证明不代表观测完整。调用方私下保存完整快照，单独展示元数据。[原生 Codex 提供方](../../packages/subagent/subagent-codex/README.zh.md) 定义支持的版本、输入检查及限制。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 

@@ -96,6 +96,14 @@ export type {
   ResolvedSubagentStartRequest,
   SubagentStopReason,
   SubagentStopReasonMap,
+  SubagentControlledReadSetRequest,
+  SubagentControlledInstructionSource,
+  SubagentControlledReadSetBoundary,
+  SubagentControlledReadSetProof,
+  SubagentControlledReadSetItem,
+  SubagentControlledReadSetFrame,
+  SubagentControlledNativeInputMessage,
+  SubagentQualifiedManagementInputHash,
 } from './types.ts'
 export {
   foldSubagentDescriptor,
@@ -625,6 +633,10 @@ export class SubagentRuntime extends TypertRemoteService {
 
   /** Reject the first requested capability that the provider lacks. */
   private assertCapabilities(provider: SubagentProvider, request: SubagentStartRequest): void {
+    if (request.controlledReadSet !== undefined
+      && (provider.inspectControlledReadSetBoundary === undefined || provider.prepareContinuable !== undefined)) {
+      throw new SubagentError(`subagent provider "${provider.name}" does not support a closed input boundary`, 'UNSUPPORTED_CAPABILITY')
+    }
     const needs: { when: boolean; cap: keyof SubagentCapabilities }[] = [
       { when: request.agentOptions !== undefined, cap: 'agentOptions' },
       { when: request.outputSchema !== undefined, cap: 'outputSchema' },

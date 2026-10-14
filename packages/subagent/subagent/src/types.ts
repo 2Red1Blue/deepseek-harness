@@ -140,6 +140,8 @@ export interface SubagentStartRequest {
   readonly label?: string
   /** Content delivered as the child's user message. */
   readonly prompt: ContentBlock[]
+  /** Require a provider-qualified closed input boundary; unsupported providers reject before start. */
+  readonly controlledReadSet?: SubagentControlledReadSetRequest
   /**
    * The spawning agent. Its effective directory supplies the default cwd;
    * in-process children retain its origin, lineage, and delegation depth.
@@ -190,6 +192,138 @@ export interface SubagentStartRequest {
    * persona (strict `{{…}}` interpolation against the registered variables).
    */
   readonly persona?: string
+}
+
+/** Per-request opt-in; existing provider configuration and model selection remain authoritative. */
+export interface SubagentControlledReadSetRequest {
+  readonly mode: 'closed-input'
+  readonly expectedBoundaryRef: string
+  /** SHA256 of UTF-8 JSON.stringify([{type:'text',text:actualPrompt}]); exactly one text block. */
+  readonly expectedInputHash: string
+  readonly qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[]
+}
+
+export interface SubagentQualifiedManagementInputHash {
+  readonly role: 'developer' | 'system'
+  /** Canonical hash of {role,content}, replacing only exact cwd text with <CONTROLLED_CWD>. */
+  readonly templateHash: string
+}
+
+/** Loaded administrative instructions, never a research-source declaration. */
+export interface SubagentControlledInstructionSource {
+  readonly path: string
+  readonly contentHash: string
+  readonly byteLength: number
+  /** Exact snapshot for the Host's immutable proof Artifact; projections may omit the content. */
+  readonly content: string
+}
+
+/** Facts produced by a real zero-turn native preflight, not by a profile boolean. */
+export interface SubagentControlledReadSetBoundary {
+  readonly version: 1
+  readonly mode: 'closed-input'
+  readonly boundaryRef: string
+  readonly provider: string
+  readonly model: string
+  readonly runtimeVersion: '0.162.1'
+  readonly policy: Readonly<{
+    cwd: string
+    approvalPolicy: 'never'
+    sandbox: 'read-only'
+    networkAccess: false
+    webSearch: 'disabled'
+    projectDocMaxBytes: 0
+    userConfigIgnored: false
+    features: Readonly<Record<string, boolean>>
+    mcpDisabledNames: readonly string[]
+    mcpToolInventory: readonly Readonly<{ name: string; toolNames: readonly string[] }>[]
+    baseInstructions: string
+    developerInstructions: string
+    qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[]
+  }>
+  readonly instructionSources: readonly SubagentControlledInstructionSource[]
+}
+
+/** Metadata of one native item; private reasoning content is never retained. */
+export interface SubagentControlledReadSetItem {
+  readonly id: string
+  readonly type: 'userMessage' | 'agentMessage' | 'reasoning'
+  readonly contentHash: string
+  readonly byteLength: number
+}
+
+/** One observed protocol frame; payload hashes contain no retained reasoning text. */
+export interface SubagentControlledReadSetFrame {
+  readonly order: number
+  readonly direction: 'to-native' | 'from-native'
+  readonly method: string
+  readonly payloadHash: string
+  readonly byteLength: number
+}
+
+/** Actual client-visible native inputs; generated administrative text is never research evidence. */
+export interface SubagentControlledNativeInputMessage {
+  readonly ordinal: number
+  readonly nativeMessageId: string
+  readonly role: 'developer' | 'system' | 'user'
+  readonly kind: 'research' | 'administrative'
+  readonly administrativeKind?: 'native-management' | 'verified-instruction-sources-and-environment'
+  readonly managementTemplateHash?: string
+  readonly content: readonly Readonly<{ type: 'input_text' | 'text'; text: string }>[]
+  /** SHA256 of recursively key-sorted canonical JSON(content), preserving block order. */
+  readonly contentHash: string
+  readonly byteLength: number
+  /** Only the three observed non-credential protocol fields; unknown fields fail closed. */
+  readonly nativeMetadata: Readonly<{ turn_id: string; create_time: number; content_item_kinds: readonly string[] }>
+  /** Canonical hash of the complete known native message wrapper, including protocol metadata. */
+  readonly nativeMessageHash: string
+}
+
+/** Fresh native execution proof, sealed only after all accepted input and item identities close. */
+export interface SubagentControlledReadSetProof {
+  readonly version: 1
+  readonly mode: 'closed-input'
+  readonly boundaryRef: string
+  readonly provider: string
+  readonly model: string
+  readonly runtimeVersion: '0.162.1'
+  /** Provider-minted external execution identity, identical to the returned SubagentRun.id. */
+  readonly childId: string
+  readonly cwd: string
+  readonly modelEvidence: 'native-thread-accepted'
+  readonly advertisedResponseModel?: string
+  readonly qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[]
+  readonly threadId: string
+  readonly turnId: string
+  readonly inputHash: string
+  /** SHA256 of the exact sole UTF-8 prompt, for the Host context manifest binding. */
+  readonly promptContentHash: string
+  readonly instructionSources: readonly SubagentControlledInstructionSource[]
+  readonly nativeInputMessages: readonly SubagentControlledNativeInputMessage[]
+  readonly items: readonly SubagentControlledReadSetItem[]
+  readonly startedItemIds: readonly string[]
+  readonly completedItemIds: readonly string[]
+  /** Terminal items may be a summary subset, never treated as a complete snapshot. */
+  readonly terminalItemIds: readonly string[]
+  readonly terminalItemsView: 'summary' | 'full'
+  /** SHA256 of recursively key-sorted canonical JSON(items), preserving array order. */
+  readonly itemSetHash: string
+  readonly ownerFrames: readonly SubagentControlledReadSetFrame[]
+  /** SHA256 of recursively key-sorted canonical JSON(ownerFrames), preserving array order. */
+  readonly ownerStreamHash: string
+  readonly seal: Readonly<{
+    method: 'native-terminal-item-stream'
+    turnStatus: 'completed'
+    inputItemCount: 1
+    toolItemCount: 0
+    unknownItemCount: 0
+    malformedFrameCount: 0
+    configurationStable: true
+    instructionSourcesStable: true
+    mcpInventoryEmpty: true
+    inputMatch: true
+    itemsMatch: true
+  }>
 }
 
 /** Provider-facing request with an absolute directory selected before startup. */
@@ -260,6 +394,8 @@ export type SubagentStopReason = SubagentStopReasonMap[keyof SubagentStopReasonM
  * The terminal outcome of a subagent run, resolved by {@link SubagentRun.result}.
  */
 export interface SubagentResult {
+  /** Present only when the opted-in native owner proved and sealed the requested boundary. */
+  readonly controlledReadSet?: SubagentControlledReadSetProof
   /**
    * The child's final assistant output is the content of its last non-empty
    * assistant message. Empty-content messages, including usage-only messages,
@@ -338,6 +474,9 @@ export interface SubagentProvider {
    * is detached immutable data and requires `agentOptions` support.
    */
   readonly agentRouteDefaults?: Readonly<{ provider: string; model: string }>
+  /** Inspect an actual zero-turn native boundary at this exact explicit execution-world cwd. */
+  inspectControlledReadSetBoundary?(request: Readonly<{ cwd: string; signal: AbortSignal;
+    qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[] }>): Promise<SubagentControlledReadSetBoundary>
   /**
    * Establish one external execution and return its owned handle.
    * The service has already validated that every requested start-time

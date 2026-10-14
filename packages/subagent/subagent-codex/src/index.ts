@@ -26,6 +26,8 @@ import {
   type CodexPermissionMode,
   type CodexRunSpec,
 } from './run.ts'
+import { inspectCodexControlledBoundary } from './controlled.ts'
+import type { SubagentControlledReadSetBoundary, SubagentQualifiedManagementInputHash } from '@deepseek-ai/dsh-subagent'
 
 export const name = 'subagent-codex'
 export const inject = ['subagents', 'subprocess']
@@ -70,6 +72,22 @@ class CodexProvider implements SubagentProvider {
     private readonly config: ResolvedConfig,
   ) {}
 
+  async inspectControlledReadSetBoundary(request: Readonly<{ cwd: string; signal: AbortSignal;
+    qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[] }>): Promise<SubagentControlledReadSetBoundary> {
+    const cwd = assertUsableCwd('subagent-codex', 'controlled child cwd', request.cwd)
+    return await inspectCodexControlledBoundary({ cwd, providerName: this.name,
+      ...this.config.model === undefined ? {} : { model: this.config.model },
+      permissionMode: this.config.permissionMode, env: this.config.env, disposeGraceMs: this.config.disposeGraceMs,
+      spawn: spec => this.ctx.subprocess.spawn(spec), readInstructionSource: path => this.readInstructionSource(path),
+    }, request.signal, request.qualifiedManagementInputHashes)
+  }
+
+  private async readInstructionSource(path: string): Promise<Uint8Array> {
+    const fs = this.ctx.get('fs', false)
+    if (fs === undefined) throw new Error('Controlled native boundary requires the execution-world filesystem')
+    return await fs.readBytes(await fs.resolve(path), undefined, 16 * 1024 * 1024)
+  }
+
   start(request: ResolvedSubagentStartRequest) {
     let cwd: string
     try {
@@ -84,6 +102,8 @@ class CodexProvider implements SubagentProvider {
     }
     const spec: CodexRunSpec = {
       cwd,
+      providerName: this.name,
+      readInstructionSource: path => this.readInstructionSource(path),
       ...this.config.model === undefined ? {} : { model: this.config.model },
       permissionMode: this.config.permissionMode,
       env: this.config.env,
