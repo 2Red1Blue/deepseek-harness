@@ -31,7 +31,7 @@ const REPAIRED_WORKSPACES = [
     path: 'packages/subagent/subagent-codex',
     name: '@deepseek-ai/dsh-subagent-codex',
     dependency: '@openai/codex',
-    version: '0.153.4',
+    version: '0.162.1',
   },
   {
     path: 'packages/skill/skill-office',
@@ -50,10 +50,10 @@ const LOCKED_OPTIONAL_PAYLOADS = [
     executableFiles: ['claude'],
   },
   {
-    lockKey: '@openai/codex@0.153.4-darwin-arm64',
-    packageDirectory: '@openai+codex@0.153.4-darwin-arm64/node_modules/@openai/codex',
+    lockKey: '@openai/codex@0.162.1-darwin-arm64',
+    packageDirectory: '@openai+codex@0.162.1-darwin-arm64/node_modules/@openai/codex',
     name: '@openai/codex',
-    version: '0.153.4-darwin-arm64',
+    version: '0.162.1-darwin-arm64',
     executableFiles: [
       'vendor/aarch64-apple-darwin/bin/codex',
       'vendor/aarch64-apple-darwin/bin/codex-code-mode-host',

@@ -1,5 +1,7 @@
 /**
- * Minimal Codex app-server 0.153.4 protocol adapter. The shared JSON-RPC
+ * Minimal Codex app-server adapter; historical protocol baseline 0.153.4.
+ * Pinned CLI 0.162.1 has schema and keyless qualification, separate from
+ * credentialed provider coverage. The shared JSON-RPC
  * transport owns framing and request correlation; this module owns only the
  * product methods, current thread/turn association, unattended approval
  * responses, and terminal-answer selection.

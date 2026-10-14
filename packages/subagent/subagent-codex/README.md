@@ -183,6 +183,6 @@ These limits define when this provider is a poor fit or needs special operationa
 This Dev Note is working context for maintainers: open questions and undecided directions. It is explicitly non-authoritative — shipped behavior and limits live in the sections above and in the package code.
 
 - **Payload size disclosure** — the current darwin-arm64 platform payload packs to about 114 MB and unpacks to about 282 MB; these are disclosure numbers, not installation thresholds.
-- **Version-pinned protocol** — the runtime dependency is pinned to `@openai/codex@0.153.4`; upgrading requires regenerating the upstream schema evidence and rerunning the credentialed nonce tests.
+- **Version-pinned protocol** — the runtime dependency is pinned to `@openai/codex@0.162.1`. Its regenerated upstream schema, handshake, answer selection, approvals, cancellation, and keyless real-product tests passed. The 0.153.4 evidence remains historical; the credentialed DeepSeek nonce test was not rerun, so this does not establish provider-wide upgrade qualification.
 
 </details>
