@@ -13,7 +13,8 @@ const approved = [{ role: 'developer' as const, templateHash: controlledManageme
   [{ type: 'input_text', text: 'known native administrative text' }], cwd) }]
 function fixture(options: { tool?: boolean; unknown?: boolean; trailing?: boolean; utf8?: boolean;
   view?: string; extraUser?: boolean; extraBlock?: boolean; missingPipe?: boolean; setupThrow?: boolean;
-  holdTurn?: boolean; wrongVersion?: boolean; sourceChanges?: boolean; unapprovedManagement?: boolean } = {}) {
+  holdTurn?: boolean; wrongVersion?: boolean; sourceChanges?: boolean; unapprovedManagement?: boolean;
+  failedTerminal?: boolean; inputMismatch?: boolean; unclosedItem?: boolean; changedSummary?: boolean } = {}) {
   const calls: string[] = [], handles: SubprocessHandle[] = []
   let sourceReads = 0, spawned = 0
   const metadata = (count: number) => ({ turn_id: 'turn-1', create_time: 1, content_item_kinds: Array(count).fill('text') })
@@ -58,7 +59,8 @@ function fixture(options: { tool?: boolean; unknown?: boolean; trailing?: boolea
             notify('turn/started', { threadId, turn: { id: 'turn-1' } })
             if (options.holdTurn) continue
             const item = (value: Obj) => { notify('item/started', { threadId, turnId: 'turn-1', item: value }); notify('item/completed', { threadId, turnId: 'turn-1', item: value }) }
-            item({ id: 'u', type: 'userMessage', content: [{ type: 'text', text: prompt }] })
+            item({ id: 'u', type: 'userMessage', content: [{ type: 'text', text: options.inputMismatch ? 'PRIVATE_OTHER_PROMPT' : prompt }] })
+            if (options.unclosedItem) notify('item/started', { threadId, turnId: 'turn-1', item: { id: 'unclosed', type: 'reasoning' } })
             const raw = (id: string, role: string, texts: string[]) => notify('rawResponseItem/completed', { threadId, turnId: 'turn-1',
               item: { type: 'message', id, role, content: texts.map(text => ({ type: 'input_text', text, ...(options.extraBlock ? { annotations: [] } : {}) })),
                 internal_chat_message_metadata_passthrough: metadata(texts.length) } })
@@ -71,7 +73,9 @@ function fixture(options: { tool?: boolean; unknown?: boolean; trailing?: boolea
             const answer = { id: 'a', type: 'agentMessage', phase: 'final_answer', text: 'public result' }
             item(answer)
             notify('rawResponse/completed', { threadId, turnId: 'turn-1', responseId: 'response-1', usage: {} })
-            notify('turn/completed', { threadId, turn: { id: 'turn-1', status: 'completed', itemsView: options.view ?? 'summary', items: [answer] } })
+            notify('turn/completed', { threadId, turn: { id: 'turn-1', status: options.failedTerminal ? 'failed' : 'completed',
+              ...(options.failedTerminal ? { error: { message: 'PRIVATE_NATIVE_ERROR_WITH_SECRET', codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 429 } } } } : {}),
+              itemsView: options.view ?? 'summary', items: [options.changedSummary ? { ...answer, text: 'PRIVATE_DISPLAY_SUMMARY' } : answer] } })
           }
           if (method === 'mcpServerStatus/list' && calls.filter(value => value === 'turn/start').length > 0) {
             if (options.trailing) from.write('{"unfinished":')
@@ -136,5 +140,25 @@ describe('native closed input owner boundary', () => {
     expect(await run.result).toMatchObject({ stopReason: 'aborted' })
     expect((await run.result).controlledReadSet).toBeUndefined()
     expect(test.handles.at(-1)!.terminate).toHaveBeenCalledTimes(1)
+  })
+  it.each([
+    [{ failedTerminal: true }, 'turn-status-not-completed'],
+    [{ unclosedItem: true }, 'unclosed-items-or-user-count'],
+    [{ inputMismatch: true }, 'sole-input-mismatch'],
+    [{ changedSummary: true }, 'terminal-summary-item-mismatch'],
+  ] as const)('reports a precise safe terminal violation %j', async (options, code) => {
+    const test = fixture(options), run = await open(test), result = await run.result
+    expect(result.stopReason).toBe('error')
+    expect(result.controlledReadSet).toBeUndefined()
+    expect(result.diagnostic).toContain(`violation=${code}`)
+    expect(result.diagnostic).toContain('ownerStreamHash')
+    expect(result.diagnostic).not.toMatch(/PRIVATE_NATIVE_ERROR|PRIVATE_OTHER_PROMPT|PRIVATE_DISPLAY_SUMMARY|PRIVATE_REASONING/)
+    if ('failedTerminal' in options && options.failedTerminal) {
+      expect(result.diagnostic).toContain('"codexErrorInfoType":"httpConnectionFailed"')
+      expect(result.diagnostic).toContain('"httpStatus":429')
+      expect(result.diagnostic).toContain('"terminalStatus":"failed"')
+    }
+    if ('changedSummary' in options && options.changedSummary) expect(result.diagnostic).toContain('completedMismatchBytes')
+    await run.dispose()
   })
 })

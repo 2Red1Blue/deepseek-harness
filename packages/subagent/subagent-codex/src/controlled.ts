@@ -25,6 +25,25 @@ const BASE = 'You are a bounded research worker. All research input is supplied 
 const DEVELOPER = 'Closed-input research: use only the complete supplied research material and recorded administrative '
   + 'instructions. No additional reading or tools are permitted. Do not claim to have read an external source.'
 const MAX_BYTES = 16 * 1024 * 1024
+const SAFE_ERROR_TYPES = new Set(['contextWindowExceeded', 'sessionBudgetExceeded', 'usageLimitExceeded',
+  'serverOverloaded', 'internalServerError', 'cyberPolicy', 'misalignmentPolicyViolation', 'unauthorized',
+  'badRequest', 'threadRollbackFailed', 'other', 'sandboxError', 'httpConnectionFailed',
+  'responseStreamConnectionFailed', 'responseStreamDisconnected', 'responseTooManyFailedAttempts', 'activeTurnNotSteerable'])
+function safeTerminalFailure(turn: Obj): Record<string, string | number> {
+  const result: Record<string, string | number> = {}
+  if (turn.status !== 'failed' || turn.error === null || typeof turn.error !== 'object' || Array.isArray(turn.error)) return result
+  const info = (turn.error as Obj).codexErrorInfo
+  const type = typeof info === 'string' ? info : info !== null && typeof info === 'object' && !Array.isArray(info)
+    && Object.keys(info).length === 1 ? Object.keys(info)[0] : undefined
+  if (type === undefined || !SAFE_ERROR_TYPES.has(type)) return { codexErrorInfoType: 'unknown' }
+  result.codexErrorInfoType = type
+  if (info !== null && typeof info === 'object' && !Array.isArray(info)) {
+    const fields = (info as Obj)[type]
+    const status = fields !== null && typeof fields === 'object' && !Array.isArray(fields) ? (fields as Obj).httpStatusCode : undefined
+    if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) result.httpStatus = status
+  }
+  return result
+}
 const READONLY_NOTIFICATIONS = new Set(['account/rateLimits/updated', 'account/updated', 'configWarning',
   'remoteControl/status/changed', 'thread/started', 'thread/status/changed', 'thread/tokenUsage/updated',
   'warning', 'turn/started', 'turn/completed', 'item/started', 'item/completed', 'item/agentMessage/delta',
@@ -369,24 +388,56 @@ export async function startControlledCodexRun(request: SubagentStartRequest, spe
   request.signal.addEventListener('abort', abort, { once: true })
   const result = (async (): Promise<SubagentResult> => {
     let stage = 'turn-start'
+    let violation = 'turn-start-or-observation-failed'
+    const facts: Record<string, string | number | boolean> = { expectedInputHash: inputHash }
+    const reject = (code: string): never => { violation = code; throw new Error('Controlled native boundary rejected a fixed validation condition') }
     try {
       const begun = obj(await connection.call('turn/start', { threadId: connection.threadId, model: spec.model,
         input: [{ type: 'text', text: prompt, text_elements: [] }], approvalPolicy: 'never',
         sandboxPolicy: { type: 'readOnly', networkAccess: false } }, request.signal))
       const turnId = str(obj(begun.turn).id)
-      if (connection.turnId !== undefined && connection.turnId !== turnId) throw new Error('Native accepted a different turn')
+      if (connection.turnId !== undefined && connection.turnId !== turnId) reject('accepted-turn-id-mismatch')
       connection.turnId = turnId
       stage = 'native-terminal-item-stream'
+      violation = 'native-terminal-observation-or-shape-invalid'
       const turn = await Promise.race([connection.terminal.promise, connection.failure.promise])
-      if (turn.status !== 'completed' || turn.id !== turnId) throw new Error('Native turn did not complete normally')
+      facts.terminalStatus = ['completed', 'failed', 'interrupted'].includes(String(turn.status)) ? String(turn.status) : 'unknown'
+      facts.terminalTurnIdMatched = turn.id === turnId
+      Object.assign(facts, safeTerminalFailure(turn))
+      if (turn.status !== 'completed') reject('turn-status-not-completed')
+      if (turn.id !== turnId) reject('terminal-turn-id-mismatch')
       const ended = [...connection.completed.values()]
-      if (connection.started.size !== ended.length || ended.filter(value => value.meta.type === 'userMessage').length !== 1) throw new Error('Native item stream did not close')
+      facts.startedItemCount = connection.started.size
+      facts.completedItemCount = ended.length
+      facts.userItemCount = ended.filter(value => value.meta.type === 'userMessage').length
+      facts.startedItemIdsHash = semanticHash([...connection.started.keys()])
+      facts.completedItemIdsHash = semanticHash(ended.map(value => value.meta.id))
+      if (connection.started.size !== ended.length || facts.userItemCount !== 1) reject('unclosed-items-or-user-count')
       const user = ended.find(value => value.meta.type === 'userMessage')!.raw
       const content = array(user.content)
-      if (content.length !== 1 || obj(content[0]).type !== 'text' || obj(content[0]).text !== prompt) throw new Error('Native accepted input differs from the sole Host prompt')
+      facts.observedInputHash = controlledHash(JSON.stringify(content.map(value => {
+        const block = obj(value)
+        return { type: block.type, text: block.text }
+      })))
+      facts.userContentBlockCount = content.length
+      if (content.length !== 1 || obj(content[0]).type !== 'text' || obj(content[0]).text !== prompt) reject('sole-input-mismatch')
       const terminalItems = array(turn.items)
-      if (terminalItems.some(value => { const item = obj(value); return !ended.some(candidate => candidate.meta.id === item.id && candidate.meta.contentHash === semanticHash(item)) })) throw new Error('Native terminal summary changed a completed item')
+      facts.terminalItemCount = terminalItems.length
+      facts.terminalItemsView = turn.itemsView === 'summary' || turn.itemsView === 'full' ? turn.itemsView : 'unknown'
+      const mismatched = terminalItems.filter(value => { const item = obj(value); return !ended.some(candidate => candidate.meta.id === item.id && candidate.meta.contentHash === semanticHash(item)) })
+      if (mismatched.length > 0) {
+        const item = obj(mismatched[0]), completed = ended.find(value => value.meta.id === item.id)
+        facts.terminalMismatchCount = mismatched.length
+        facts.terminalMismatchHash = semanticHash(item)
+        facts.terminalMismatchBytes = Buffer.byteLength(controlledCanonical(item))
+        if (completed !== undefined) {
+          facts.completedMismatchHash = completed.meta.contentHash
+          facts.completedMismatchBytes = completed.meta.byteLength
+        }
+        reject('terminal-summary-item-mismatch')
+      }
       stage = 'final-policy-check'
+      violation = 'final-policy-validation-failed'
       const config = configView(await connection.call('config/read', { cwd: spec.cwd, includeLayers: false }, request.signal))
       const tools = inventory(await connection.call('mcpServerStatus/list', { threadId: connection.threadId, detail: 'toolsAndAuthOnly', limit: 100 }, request.signal))
       const again = await Promise.race([sources(connection, boundary.instructionSources.map(value => value.path)), connection.failure.promise])
@@ -428,6 +479,7 @@ export async function startControlledCodexRun(request: SubagentStartRequest, spe
           inputItemCount: 1, toolItemCount: 0, unknownItemCount: 0, malformedFrameCount: 0, configurationStable: true,
           instructionSourcesStable: true, mcpInventoryEmpty: true, inputMatch: true, itemsMatch: true } }
       stage = 'final-output'
+      violation = 'final-output-validation-failed'
       const answer = ended.filter(value => value.meta.type === 'agentMessage').findLast(value => value.raw.phase === 'final_answer')
         ?? ended.filter(value => value.meta.type === 'agentMessage').at(-1)
       if (answer === undefined) throw new Error('Native closed turn returned no final answer')
@@ -435,7 +487,10 @@ export async function startControlledCodexRun(request: SubagentStartRequest, spe
     } catch {
       const cancelled = ownedCancelled || request.signal.aborted
       const category = cancelled ? 'cancelled' : connection.failed ? 'observation-or-transport' : 'boundary-validation'
-      return { output: [], stopReason: cancelled ? 'aborted' : 'error', diagnostic: `Controlled native read-set boundary could not be sealed (stage=${stage}; category=${category})` }
+      facts.ownerFrameCount = connection.frames.length
+      facts.ownerStreamHash = semanticHash(connection.frames)
+      facts.malformedFrameCount = connection.malformed
+      return { output: [], stopReason: cancelled ? 'aborted' : 'error', diagnostic: `Controlled native read-set boundary could not be sealed (stage=${stage}; category=${category}; violation=${violation}; facts=${JSON.stringify(facts)})` }
     } finally { outcomeSettled = true; request.signal.removeEventListener('abort', abort) }
   })()
   result.catch(() => {})
