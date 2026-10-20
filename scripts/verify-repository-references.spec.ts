@@ -72,6 +72,37 @@ describe('unique object-name prefix search', () => {
 })
 
 describe('maintained repository reference policy', () => {
+  it('accepts only the typed PyPI wheel size span while rejecting numeric commit references elsewhere', () => {
+    const numericCommit = ['626', '6838'].join('')
+    const commits = new Set([numericCommit])
+    const hash = 'f'.repeat(64)
+    const artifact = (size: string, url = 'https://files.pythonhosted.org/packages/public.whl', digest = hash): string =>
+      `    { url = "${url}", hash = "sha256:${digest}", size = ${size}, upload-time = "2026-07-01T11:54:11.71Z" },`
+    const valid = artifact(numericCommit)
+    expect(findRepositoryReferences('python/sdk/uv.lock', valid, commits)).toEqual([])
+    expect(findRepositoryReferences('uv.lock', valid, commits)).toEqual([])
+    for (const [file, source] of [
+      ['README.md', valid],
+      ['python/sdk/uv.lock', `revision = "${numericCommit}"`],
+      ['python/sdk/uv.lock', `# ${numericCommit}`],
+      ['python/sdk/uv.lock', artifact(`"${numericCommit}"`)],
+      ['python/sdk/uv.lock', artifact(numericCommit, `https://files.pythonhosted.org/${numericCommit}/public.whl`)],
+      ['python/sdk/uv.lock', `${valid} # ${numericCommit}`],
+      ['python/sdk/uv.lock', artifact(numericCommit, 'https://example.invalid/public.whl')],
+      ['python/sdk/uv.lock', artifact(numericCommit, undefined, 'bad-digest')],
+    ]) {
+      expect(findRepositoryReferences(file ?? '', source ?? '', commits)).toEqual([
+        { file, line: 1, kind: 'commit-hash' },
+      ])
+    }
+    const unsafe = String(Number.MAX_SAFE_INTEGER + 1)
+    expect(findRepositoryReferences('uv.lock', artifact(unsafe), new Set([unsafe])))
+      .toEqual([{ file: 'uv.lock', line: 1, kind: 'commit-hash' }])
+    const leadingZero = '0' + numericCommit
+    expect(findRepositoryReferences('uv.lock', artifact(leadingZero), new Set([leadingZero])))
+      .toEqual([{ file: 'uv.lock', line: 1, kind: 'commit-hash' }])
+  })
+
   it('permits only the independent kit repository and its source URLs', () => {
     for (const suffix of ['', '.git', '/tree/main/packages/entry']) {
       expect(findRepositoryReferences('package.json', `${organizationUrl}/libreoffice-kit${suffix}`, new Set())).toEqual([])

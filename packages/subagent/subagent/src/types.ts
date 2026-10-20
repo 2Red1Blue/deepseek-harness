@@ -193,6 +193,7 @@ export interface SubagentControlledReadSetRequest {
   readonly qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[]
 }
 
+/** Deployment-qualified administrative message template bound by role and canonical hash. */
 export interface SubagentQualifiedManagementInputHash {
   readonly role: 'developer' | 'system'
   /** Canonical hash of {role,content}, replacing only exact cwd text with <CONTROLLED_CWD>. */
@@ -465,8 +466,11 @@ export interface SubagentProvider {
    */
   readonly agentRouteDefaults?: Readonly<{ provider: string; model: string }>
   /** Inspect an actual zero-turn native boundary at this exact explicit execution-world cwd. */
-  inspectControlledReadSetBoundary?(request: Readonly<{ cwd: string; signal: AbortSignal;
-    qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[] }>): Promise<SubagentControlledReadSetBoundary>
+  inspectControlledReadSetBoundary?(request: Readonly<{
+    cwd: string
+    signal: AbortSignal
+    qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[]
+  }>): Promise<SubagentControlledReadSetBoundary>
   /**
    * Establish one external execution and return its owned handle.
    * The service has already validated that every requested start-time

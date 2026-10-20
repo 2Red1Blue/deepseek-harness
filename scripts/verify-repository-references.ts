@@ -13,6 +13,11 @@ const organizationUrl = new RegExp(`\\bgithub\\.com/${organization}(?![a-z0-9-])
 // The independent kit repository owns the engine source and documentation.
 const kitRepositoryUrl = new RegExp(`\\bgithub\\.com/${organization}/libreoffice-kit(?:\\.git)?(?=/|[^a-zA-Z0-9_.-]|$)`, 'g')
 const commitCandidate = /(?<![a-z0-9])[\da-f]{7,40}(?![a-z0-9])/gi
+const uvWheelArtifact = new RegExp(
+  String.raw`^(\s*\{\s*url\s*=\s*"https:\/\/files\.pythonhosted\.org\/[a-zA-Z0-9_./%+-]+\.whl"\s*,`
+  + String.raw`\s*hash\s*=\s*"sha256:[a-f0-9]{64}"\s*,\s*size\s*=\s*)([1-9]\d*)`
+  + String.raw`(?:\s*,\s*upload-time\s*=\s*"[^"\\\r\n]*")?\s*\},?(?:\s*#.*)?\s*$`,
+)
 const gitOutputLimit = 64 * 1024 * 1024
 // One 41-byte line per object; 1.2 million objects produce about 49 MiB.
 const objectListingLimit = 1024 * 1024 * 1024
@@ -34,12 +39,22 @@ function isMaintained(file: string): boolean {
     && !isLocalExecutionEvidencePath(file)
 }
 
+/** Only the typed byte-size token in a complete generated PyPI wheel record is not a reference. */
+function uvWheelSizeSpan(file: string, line: string): readonly [number, number] | undefined {
+  if (file !== 'uv.lock' && !file.endsWith('/uv.lock')) return undefined
+  const artifact = uvWheelArtifact.exec(line)
+  const prefix = artifact?.[1]
+  const size = artifact?.[2]
+  if (prefix === undefined || size === undefined || !Number.isSafeInteger(Number(size))) return undefined
+  return [prefix.length, prefix.length + size.length]
+}
+
 /**
  * Inspect a maintained source file against known commit identifiers.
  * @param file - Repository-relative path used in diagnostics and exclusions.
  * @param source - File text or a symlink's stored target.
  * @param commits - Lowercase, unambiguous full or abbreviated commit identifiers.
- * @returns One finding per line and reference kind; digests and other Git object types are accepted.
+ * @returns One finding per line and reference kind; digests, other Git object types and typed PyPI wheel byte sizes are accepted.
  */
 export function findRepositoryReferences(
   file: string,
@@ -52,7 +67,10 @@ export function findRepositoryReferences(
     if (organizationUrl.test(canonicalReferenceText(line).replace(kitRepositoryUrl, ''))) {
       references.push({ file, line: index + 1, kind: 'organization-url' })
     }
-    if ([...line.matchAll(commitCandidate)].some(match => commits.has(match[0].toLowerCase()))) {
+    const sizeSpan = uvWheelSizeSpan(file, line)
+    if ([...line.matchAll(commitCandidate)].some(match =>
+      commits.has(match[0].toLowerCase())
+      && !(sizeSpan !== undefined && match.index === sizeSpan[0] && match.index + match[0].length === sizeSpan[1]))) {
       references.push({ file, line: index + 1, kind: 'commit-hash' })
     }
   }

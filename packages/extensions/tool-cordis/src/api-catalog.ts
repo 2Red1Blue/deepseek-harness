@@ -7838,6 +7838,34 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SubagentCatalogRow = {\n    readonly id: SessionId;\n    readonly activity: \'running\' | \'inactive\';\n} & ({\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n} | {\n    readonly mode: \'external\';\n    readonly label?: string;\n} | {\n    readonly mode: \'continuable\';\n    readonly label: string;\n});',
   },
   {
+    name: 'SubagentControlledInstructionSource',
+    declaration: 'export interface SubagentControlledInstructionSource {\n    readonly path: string;\n    readonly contentHash: string;\n    readonly byteLength: number;\n    readonly content: string;\n}',
+  },
+  {
+    name: 'SubagentControlledNativeInputMessage',
+    declaration: 'export interface SubagentControlledNativeInputMessage {\n    readonly ordinal: number;\n    readonly nativeMessageId: string;\n    readonly role: \'developer\' | \'system\' | \'user\';\n    readonly kind: \'research\' | \'administrative\';\n    readonly administrativeKind?: \'native-management\' | \'verified-instruction-sources-and-environment\';\n    readonly managementTemplateHash?: string;\n    readonly content: readonly Readonly<{\n        type: \'input_text\' | \'text\';\n        text: string;\n    }>[];\n    readonly contentHash: string;\n    readonly byteLength: number;\n    readonly nativeMetadata: Readonly<{\n        turn_id: string;\n        create_time: number;\n        content_item_kinds: readonly string[];\n    }>;\n    readonly nativeMessageHash: string;\n}',
+  },
+  {
+    name: 'SubagentControlledReadSetBoundary',
+    declaration: 'export interface SubagentControlledReadSetBoundary {\n    readonly version: 1;\n    readonly mode: \'closed-input\';\n    readonly boundaryRef: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly runtimeVersion: \'0.162.1\';\n    readonly policy: Readonly<{\n        cwd: string;\n        approvalPolicy: \'never\';\n        sandbox: \'read-only\';\n        networkAccess: false;\n        webSearch: \'disabled\';\n        projectDocMaxBytes: 0;\n        userConfigIgnored: false;\n        features: Readonly<Record<string, boolean>>;\n        mcpDisabledNames: readonly string[];\n        mcpToolInventory: readonly Readonly<{\n            name: string;\n            toolNames: readonly string[];\n        }>[];\n        baseInstructions: string;\n        developerInstructions: string;\n        qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[];\n    }>;\n    readonly instructionSources: readonly SubagentControlledInstructionSource[];\n}',
+  },
+  {
+    name: 'SubagentControlledReadSetFrame',
+    declaration: 'export interface SubagentControlledReadSetFrame {\n    readonly order: number;\n    readonly direction: \'to-native\' | \'from-native\';\n    readonly method: string;\n    readonly payloadHash: string;\n    readonly byteLength: number;\n}',
+  },
+  {
+    name: 'SubagentControlledReadSetItem',
+    declaration: 'export interface SubagentControlledReadSetItem {\n    readonly id: string;\n    readonly type: \'userMessage\' | \'agentMessage\' | \'reasoning\';\n    readonly contentHash: string;\n    readonly byteLength: number;\n}',
+  },
+  {
+    name: 'SubagentControlledReadSetProof',
+    declaration: 'export interface SubagentControlledReadSetProof {\n    readonly version: 1;\n    readonly mode: \'closed-input\';\n    readonly boundaryRef: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly runtimeVersion: \'0.162.1\';\n    readonly childId: string;\n    readonly cwd: string;\n    readonly modelEvidence: \'native-thread-accepted\';\n    readonly advertisedResponseModel?: string;\n    readonly qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[];\n    readonly threadId: string;\n    readonly turnId: string;\n    readonly inputHash: string;\n    readonly promptContentHash: string;\n    readonly instructionSources: readonly SubagentControlledInstructionSource[];\n    readonly nativeInputMessages: readonly SubagentControlledNativeInputMessage[];\n    readonly items: readonly SubagentControlledReadSetItem[];\n    readonly startedItemIds: readonly string[];\n    readonly completedItemIds: readonly string[];\n    readonly terminalItemIds: readonly string[];\n    readonly terminalItemsView: \'summary\' | \'full\';\n    readonly itemSetHash: string;\n    readonly ownerFrames: readonly SubagentControlledReadSetFrame[];\n    readonly ownerStreamHash: string;\n    readonly seal: Readonly<{\n        method: \'native-terminal-item-stream\';\n        turnStatus: \'completed\';\n        inputItemCount: 1;\n        toolItemCount: 0;\n        unknownItemCount: 0;\n        malformedFrameCount: 0;\n        configurationStable: true;\n        instructionSourcesStable: true;\n        m /* …truncated — full shape in source */',
+  },
+  {
+    name: 'SubagentControlledReadSetRequest',
+    declaration: 'export interface SubagentControlledReadSetRequest {\n    readonly mode: \'closed-input\';\n    readonly expectedBoundaryRef: string;\n    readonly expectedInputHash: string;\n    readonly qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[];\n}',
+  },
+  {
     name: 'SubagentDescendantListEntry',
     declaration: 'export type SubagentDescendantListEntry = SubagentListEntry & {\n    readonly parentId: SessionId;\n    readonly depth: number;\n};',
   },
@@ -7867,11 +7895,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentProvider',
-    declaration: 'export interface SubagentProvider {\n    readonly name: string;\n    readonly capabilities: SubagentCapabilities;\n    readonly inheritsParentContext: boolean;\n    readonly agentRouteDefaults?: Readonly<{\n        provider: string;\n        model: string;\n    }>;\n    start?(request: ResolvedSubagentStartRequest): Promise<SubagentRun>;\n    prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>;\n}',
+    declaration: 'export interface SubagentProvider {\n    readonly name: string;\n    readonly capabilities: SubagentCapabilities;\n    readonly inheritsParentContext: boolean;\n    readonly agentRouteDefaults?: Readonly<{\n        provider: string;\n        model: string;\n    }>;\n    inspectControlledReadSetBoundary?(request: Readonly<{\n        cwd: string;\n        signal: AbortSignal;\n        qualifiedManagementInputHashes: readonly SubagentQualifiedManagementInputHash[];\n    }>): Promise<SubagentControlledReadSetBoundary>;\n    start?(request: ResolvedSubagentStartRequest): Promise<SubagentRun>;\n    prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>;\n}',
+  },
+  {
+    name: 'SubagentQualifiedManagementInputHash',
+    declaration: 'export interface SubagentQualifiedManagementInputHash {\n    readonly role: \'developer\' | \'system\';\n    readonly templateHash: string;\n}',
   },
   {
     name: 'SubagentResult',
-    declaration: 'export interface SubagentResult {\n    readonly output: readonly ContentBlock[];\n    readonly structured?: unknown;\n    readonly diagnostic?: string;\n    readonly stopReason: SubagentStopReason;\n}',
+    declaration: 'export interface SubagentResult {\n    readonly controlledReadSet?: SubagentControlledReadSetProof;\n    readonly output: readonly ContentBlock[];\n    readonly structured?: unknown;\n    readonly diagnostic?: string;\n    readonly stopReason: SubagentStopReason;\n}',
   },
   {
     name: 'SubagentRun',
@@ -7903,7 +7935,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentStartRequest',
-    declaration: 'export interface SubagentStartRequest {\n    readonly cwd?: string;\n    readonly agentPreset?: string;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly agentOptions?: AgentOptions;\n    readonly outputSchema?: ObjectJsonSchema;\n    readonly maxDepth?: number;\n}',
+    declaration: 'export interface SubagentStartRequest {\n    readonly cwd?: string;\n    readonly agentPreset?: string;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly controlledReadSet?: SubagentControlledReadSetRequest;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly agentOptions?: AgentOptions;\n    readonly outputSchema?: ObjectJsonSchema;\n    readonly maxDepth?: number;\n}',
   },
   {
     name: 'SubagentStopReason',

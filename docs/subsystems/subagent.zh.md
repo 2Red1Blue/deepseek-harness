@@ -401,7 +401,7 @@ type SubagentDescendantListEntry = SubagentListEntry & {
 <a id="the-terminal-result-subagentresult"></a>
 
 
-程序调用方可通过 `controlledReadSet` 请求已取得资格的原生输入观测。支持该模式的提供方公开 `inspectControlledReadSetBoundary`，入口检查不启动模型轮次。请求绑定唯一文本任务、既有检查和部署中已核实的管理模板。已完成结果可含 `controlledReadSet` 证明；缺失证明不代表观测完整。调用方私下保存完整快照，单独展示元数据。[原生 Codex 提供方](../../packages/subagent/subagent-codex/README.zh.md) 定义支持的版本、输入检查及限制。
+程序调用方可通过 `controlledReadSet` 请求已取得资格的原生输入观测。支持该模式的提供方公开 `inspectControlledReadSetBoundary`，入口检查不启动模型轮次。请求绑定唯一文本任务、既有检查和部署中已核实的管理模板。已完成结果可含 `controlledReadSet` 证明；缺失证明不代表观测完整。调用方私下保存完整快照，单独展示元数据。[原生 Codex 提供方](../../packages/subagent/subagent-codex/README.zh.md#closed-input-for-program-consumers) 定义支持的版本、输入检查及限制。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
