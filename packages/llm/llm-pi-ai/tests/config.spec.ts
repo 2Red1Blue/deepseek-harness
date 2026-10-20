@@ -107,3 +107,34 @@ describe('request image policy bounds', () => {
     }).toThrow(message)
   })
 })
+
+
+describe('explicit Anthropic thinking disabled route', () => {
+  it('keeps the opt-in absent or false by default', () => {
+    expect(routeWith({})).not.toThrow()
+    expect(routeWith({ anthropicThinkingDisabledWhenOff: false })).not.toThrow()
+    expect(resolveProfiles({ route: { api: 'openai-completions', baseURL: 'http://127.0.0.1:9', models: [{ id: 'm' }] } })
+      .get('route')?.anthropicThinkingDisabledWhenOff).toBeUndefined()
+  })
+
+  it('validates the boolean and requires the explicit Anthropic protocol', () => {
+    expect(routeWith({ anthropicThinkingDisabledWhenOff: 'true' })).toThrow()
+    expect(() => resolveProfiles({ route: {
+      api: 'anthropic-messages', anthropicThinkingDisabledWhenOff: 'true' as unknown as boolean,
+    } })).toThrow(/must be a boolean/)
+    for (const api of [undefined, 'openai-completions']) {
+      expect(() => resolveProfiles({ route: {
+        ...api === undefined ? {} : { api }, models: [{ id: 'm' }], anthropicThinkingDisabledWhenOff: true,
+      } })).toThrow(/requires explicit api anthropic-messages/)
+    }
+  })
+
+  it('retains the flag without adding reasoning capabilities or SDK compat', () => {
+    const profiles = resolveProfiles({ route: {
+      api: 'anthropic-messages', baseURL: 'http://127.0.0.1:9', models: [{ id: 'm', reasoningEfforts: false }],
+      reasoning: 'off', anthropicThinkingDisabledWhenOff: true,
+    } })
+    expect(profiles.get('route')?.anthropicThinkingDisabledWhenOff).toBe(true)
+    expect(profiles.get('route')?.compat).toBeUndefined()
+  })
+})

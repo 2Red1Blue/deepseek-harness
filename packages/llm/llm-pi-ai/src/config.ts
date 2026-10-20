@@ -152,6 +152,12 @@ export interface PiAiProviderProfile {
   headers?: Record<string, string>
   /** Provider-neutral pi-ai reasoning level. */
   reasoning?: ModelThinkingLevel
+  /**
+   * On an explicitly Anthropic Messages route, emit `thinking: { type: disabled }`
+   * when the effective request effort is explicitly `off`. Other efforts are
+   * refused before credential resolution; omission or false keeps SDK defaults.
+   */
+  anthropicThinkingDisabledWhenOff?: boolean
   /** Token budgets used by reasoning providers that support them. */
   thinkingBudgets?: ThinkingBudgets
   /** Prompt-cache retention preference. */
@@ -336,6 +342,7 @@ const profile = z.object({
   defaultInput: z.array(z.union(MODALITIES)).default([...DEFAULT_INPUT]),
   headers: z.dict(z.string()),
   reasoning: z.union(THINKING_LEVELS),
+  anthropicThinkingDisabledWhenOff: z.boolean(),
   thinkingBudgets,
   cacheRetention: z.union(['none', 'short', 'long']),
   transport: z.union(['sse', 'websocket', 'websocket-cached', 'auto']),
@@ -424,6 +431,13 @@ export function resolveProfiles(
     }
     if (source.displayName !== undefined && source.displayName.length === 0) {
       throw new Error(`llm-pi-ai: provider "${provider}" has an empty displayName`)
+    }
+    if (source.anthropicThinkingDisabledWhenOff !== undefined
+      && typeof source.anthropicThinkingDisabledWhenOff !== 'boolean') {
+      throw new Error(`llm-pi-ai: provider "${provider}" anthropicThinkingDisabledWhenOff must be a boolean`)
+    }
+    if (source.anthropicThinkingDisabledWhenOff === true && source.api !== 'anthropic-messages') {
+      throw new Error(`llm-pi-ai: provider "${provider}" anthropicThinkingDisabledWhenOff requires explicit api anthropic-messages`)
     }
     assertValidHeaders(provider, source.headers)
     const streamIdleTimeoutMs = source.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS

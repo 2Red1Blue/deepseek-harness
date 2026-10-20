@@ -90,6 +90,12 @@ kind: "package-reference"
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-llm-pi-ai)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
+### 显式关闭 Anthropic thinking
+
+显式设置 `api: anthropic-messages` 的路由可以启用 `anthropicThinkingDisabledWhenOff: true`。有效请求 effort（先取 `GenerateOptions.reasoningEffort`，再取 profile 的 `reasoning`）必须明确为 `off`；缺失或启用的 effort 会在凭据解析与 SDK 分派前失败。适配器随后在原生 SDK payload 上设置 `thinking: { type: disabled }`，移除冲突的 `reasoning_effort` 和 `output_config.effort`，并保留其它 output 配置。这不会为非推理模型声明推理能力。省略该字段或设置为 `false` 时，既有 SDK 行为保持不变，包括在 `off` 时省略 thinking 字段的提供方。
+
+此设置控制 Harness 发出的 payload；网关可能改写它或使用其它设置重试，上游也可能忽略它。它不构成对上游推理预算、token 节省或响应结果的保证。
+
 ### 登录提供方
 
 pi-ai 提供登录的提供方可以通过 harness 授权 seam 登录：流程提供 OAuth 或交互式密钥提示（密钥键入 pi-ai 自己的登录提示，而非设置表单），得到的凭据存储在 harness 凭据存储的 `llm-pi-ai/<provider id>` 记录中。存储的登录在其路由的 `apiKeyEnv` 覆盖之下完成认证，并在存储的跨进程锁下自行刷新；退出登录即删除存储记录。落在记录文法之外——小写连字符标识符——的手工声明路由键无法登录，因为对它的记录写入会以 `LlmError('UNSTORABLE_PROVIDER_ID')` 拒绝；这类路由改用 `apiKeyEnv` 或提供方 ambient 设置认证。

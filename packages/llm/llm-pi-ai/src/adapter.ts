@@ -123,6 +123,22 @@ export interface PiAiAuthInjection {
   authContext: AuthContext
 }
 
+/** Enforce the route's explicit-off wire contract without reading message payloads. */
+function disableAnthropicThinking(payload: unknown): void {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new LlmError('pi-ai Anthropic payload must be an object', 'UNSUPPORTED_OPTION')
+  }
+  const body = payload as Record<string, unknown>
+  const outputConfig = body.output_config
+  if (outputConfig !== undefined
+    && (outputConfig === null || typeof outputConfig !== 'object' || Array.isArray(outputConfig))) {
+    throw new LlmError('pi-ai Anthropic output_config must be an object', 'UNSUPPORTED_OPTION')
+  }
+  body.thinking = { type: 'disabled' }
+  delete body.reasoning_effort
+  if (outputConfig !== undefined) delete (outputConfig as Record<string, unknown>).effort
+}
+
 /** Copy profile stream knobs into pi-ai's common option vocabulary. */
 function profileOptions(
   profile: ResolvedPiAiProviderProfile,
@@ -138,6 +154,7 @@ function profileOptions(
     ...profile.transport === undefined ? {} : { transport: profile.transport },
     ...profile.timeoutMs === undefined ? {} : { timeoutMs: profile.timeoutMs },
     ...profile.websocketConnectTimeoutMs === undefined ? {} : { websocketConnectTimeoutMs: profile.websocketConnectTimeoutMs },
+    ...profile.anthropicThinkingDisabledWhenOff === true ? { onPayload: disableAnthropicThinking } : {},
     // The agent recovery layer owns visible attempts; one adapter call is one SDK attempt.
     maxRetries: 0,
   }
@@ -381,6 +398,13 @@ export class PiAiAdapter extends LlmAdapter {
       model,
       options.reasoningEffort ?? profile.reasoning,
     )
+    if (profile.anthropicThinkingDisabledWhenOff === true
+      && (model.api !== 'anthropic-messages' || reasoning !== 'off')) {
+      throw new LlmError(
+        'pi-ai anthropicThinkingDisabledWhenOff requires Anthropic Messages and explicit reasoning effort off',
+        'UNSUPPORTED_OPTION',
+      )
+    }
     const apiKey = await this.config.resolveApiKey(options.provider, profile)
 
     const consumer = new AbortController()

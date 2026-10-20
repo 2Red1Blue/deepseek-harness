@@ -23,6 +23,9 @@
 /deepseek-ai-dsh-llm-pi-ai/use-this-package/configure-provider-routes:
   en: c5d28300fa2cfc6f
   zh: c162855dcb54b65b
+/deepseek-ai-dsh-llm-pi-ai/use-this-package/explicit-anthropic-thinking-disablement:
+  en: 0601ef60e351c9ea
+  zh: ea40fa5d8eea343a
 /deepseek-ai-dsh-llm-pi-ai/use-this-package/sign-in-to-a-provider:
   en: c36f66438638ae08
   zh: 066a2fc4cb97c86f

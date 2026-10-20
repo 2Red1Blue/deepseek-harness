@@ -1779,7 +1779,7 @@ export interface Config extends ProtocolConfig {
 
 - `inject`: `llm`
 - `refs`: `Api` (`@earendil-works/pi-ai`) · `CacheRetention` (`@earendil-works/pi-ai`) · `Model` (`@earendil-works/pi-ai`) · `ModelThinkingLevel` (`@earendil-works/pi-ai`) · `OpenAICompletionsCompat` (`@earendil-works/pi-ai`) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets` (`@earendil-works/pi-ai`) · `Transport` (`@earendil-works/pi-ai`) · `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/llm/llm-pi-ai/src/config.ts:222`](../packages/llm/llm-pi-ai/src/config.ts)
+- `source`: [`packages/llm/llm-pi-ai/src/config.ts:228`](../packages/llm/llm-pi-ai/src/config.ts)
 
 ```ts config-catalog
 /** Plugin configuration: the provider routes this instance owns. */
@@ -1856,6 +1856,12 @@ export interface PiAiProviderProfile {
   headers?: Record<string, string>
   /** Provider-neutral pi-ai reasoning level. */
   reasoning?: ModelThinkingLevel
+  /**
+   * On an explicitly Anthropic Messages route, emit `thinking: { type: disabled }`
+   * when the effective request effort is explicitly `off`. Other efforts are
+   * refused before credential resolution; omission or false keeps SDK defaults.
+   */
+  anthropicThinkingDisabledWhenOff?: boolean
   /** Token budgets used by reasoning providers that support them. */
   thinkingBudgets?: ThinkingBudgets
   /** Prompt-cache retention preference. */
@@ -3327,7 +3333,7 @@ export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 
 - `inject`: `workingDirectory`
 - `refs`: `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/subagent/subagent/src/index.ts:186`](../packages/subagent/subagent/src/index.ts)
+- `source`: [`packages/subagent/subagent/src/index.ts:194`](../packages/subagent/subagent/src/index.ts)
 
 ```ts config-catalog
 /** Host configuration for continuable subagent capacity. */
@@ -3428,7 +3434,7 @@ export type ClaudeCodePermissionMode = typeof CLAUDE_CODE_PERMISSION_MODES[numbe
 ## `@deepseek-ai/dsh-subagent-codex`
 
 - `inject`: `subagents` · `subprocess`
-- `source`: [`packages/subagent/subagent-codex/src/index.ts:36`](../packages/subagent/subagent-codex/src/index.ts)
+- `source`: [`packages/subagent/subagent-codex/src/index.ts:38`](../packages/subagent/subagent-codex/src/index.ts)
 
 ```ts config-catalog
 /** Deployment-owned model, permission, environment, and process-release settings. */
