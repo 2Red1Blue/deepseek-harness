@@ -66,7 +66,7 @@ function boundFixture(
     },
   }))
   return {
-    config: `- id: subject\n  name: '${SUBJECT}'\n`,
+    roster: [SUBJECT],
     profile: 'external-lib-check',
     workspaces: new Map([[SUBJECT, packageRoot]]),
     resolveFrom: root,
