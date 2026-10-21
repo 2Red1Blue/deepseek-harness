@@ -18,6 +18,12 @@ export interface WorkspaceEmitResult extends ModelEmitResult {
 
 /** Behavior switches for one {@link WorkspaceTypertGenerator}. */
 export interface WorkspaceTypertGeneratorOptions {
+  /** Host aggregate path relative to the workspace root; omission uses `tsconfig.host.json`. */
+  readonly hostConfig?: string
+  /** Client aggregate path relative to the workspace root; omission uses `tsconfig.client.json`. */
+  readonly clientConfig?: string
+  /** Trusted package-container directories whose aggregate references may participate in analysis. */
+  readonly additionalPackageRoots?: readonly string[]
   /**
    * Run the per-package syntactic/semantic diagnostic pass before analysis
    * (default true). Pass false only when the same orchestration already
@@ -64,6 +70,9 @@ export class WorkspaceTypertGenerator {
     return new WorkspaceAnalyzer({
       root: this.root,
       caches: this.caches,
+      ...(this.options.hostConfig === undefined ? {} : { hostConfig: this.options.hostConfig }),
+      ...(this.options.clientConfig === undefined ? {} : { clientConfig: this.options.clientConfig }),
+      ...(this.options.additionalPackageRoots === undefined ? {} : { additionalPackageRoots: this.options.additionalPackageRoots }),
       ...(faces === undefined ? {} : { faces }),
     }).discoverPackages(includeManifest)
   }
@@ -81,6 +90,9 @@ export class WorkspaceTypertGenerator {
       root: this.root,
       packages: contributors,
       caches: this.caches,
+      ...(this.options.hostConfig === undefined ? {} : { hostConfig: this.options.hostConfig }),
+      ...(this.options.clientConfig === undefined ? {} : { clientConfig: this.options.clientConfig }),
+      ...(this.options.additionalPackageRoots === undefined ? {} : { additionalPackageRoots: this.options.additionalPackageRoots }),
       ...(faces === undefined ? {} : { faces }),
       ...(this.options.checkDiagnostics === undefined ? {} : { checkDiagnostics: this.options.checkDiagnostics }),
       ...(this.options.rejectBuildOutputs === undefined ? {} : { rejectBuildOutputs: this.options.rejectBuildOutputs }),

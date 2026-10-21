@@ -71,6 +71,8 @@ export interface WorkspaceAnalyzerOptions {
   readonly hostConfig?: string
   /** Client aggregate path, relative to {@link root}; absent files are skipped. */
   readonly clientConfig?: string
+  /** Trusted package-container directories admitted alongside `<root>/packages`; only aggregate references are discovered. */
+  readonly additionalPackageRoots?: readonly string[]
   /** Optional package-name subset for an incremental generation pass. */
   readonly packages?: readonly string[]
   /** Independently compiled faces to materialize; both are analyzed by default. */
@@ -330,7 +332,7 @@ export class WorkspaceCaches {
 export class WorkspaceAnalyzer {
   private readonly options: Required<Pick<
     WorkspaceAnalyzerOptions,
-    'root' | 'hostConfig' | 'clientConfig' | 'faces' | 'checkDiagnostics' | 'mode' | 'rejectBuildOutputs'
+    'root' | 'hostConfig' | 'clientConfig' | 'additionalPackageRoots' | 'faces' | 'checkDiagnostics' | 'mode' | 'rejectBuildOutputs'
   >> & Pick<WorkspaceAnalyzerOptions, 'packages'>
   private queuedEdit: SourceEdit | undefined
   private readonly crossFaceLinks = new Map<string, CrossFaceLink>()
@@ -341,6 +343,7 @@ export class WorkspaceAnalyzer {
   constructor(options: WorkspaceAnalyzerOptions) {
     this.options = {
       root: realPath(options.root),
+      additionalPackageRoots: options.additionalPackageRoots?.map(path => realPath(resolve(options.root, path))) ?? [],
       hostConfig: options.hostConfig ?? 'tsconfig.host.json',
       clientConfig: options.clientConfig ?? 'tsconfig.client.json',
       faces: options.faces ?? ['host', 'client'],
@@ -529,7 +532,9 @@ export class WorkspaceAnalyzer {
   }
 
   private loadRegistrations(includeVendor = false): PackageRegistration[] {
-    const inventoryKey = `${this.options.root}\0${this.options.hostConfig}\0${this.options.clientConfig}\0${String(includeVendor)}`
+    const inventoryKey = JSON.stringify([
+      this.options.root, this.options.hostConfig, this.options.clientConfig, this.options.additionalPackageRoots, includeVendor,
+    ])
     const cached = this.caches.registrations.get(inventoryKey)
     if (cached !== undefined) return cached
     const registrations: PackageRegistration[] = []
@@ -541,6 +546,7 @@ export class WorkspaceAnalyzer {
         const configPath = projectConfigPath(reference.path)
         const packageRoot = dirname(configPath)
         if (!isWithin(realPath(packageRoot), join(this.options.root, 'packages'))
+          && !this.options.additionalPackageRoots.some(root => isWithin(realPath(packageRoot), root))
           && !(includeVendor && isWithin(realPath(packageRoot), join(this.options.root, 'vendor')))) continue
         const manifestPath = join(packageRoot, 'package.json')
         if (!existsSync(manifestPath)) continue
@@ -572,6 +578,15 @@ export class WorkspaceAnalyzer {
             : clientExportSubpaths(manifest)))
         }
       }
+    }
+    const identities = new Map<string, string>()
+    for (const registration of registrations) {
+      const key = `${registration.face}\0${registration.name}`
+      const previous = identities.get(key)
+      if (previous !== undefined && previous !== registration.root) {
+        throw new TypertAnalysisError(`typert(${registration.face}): package ${registration.name} has conflicting roots ${previous} and ${registration.root}`)
+      }
+      identities.set(key, registration.root)
     }
     const inventory = uniqueBy(registrations, registration => `${registration.face}\0${registration.name}`)
       .sort((left, right) =>
