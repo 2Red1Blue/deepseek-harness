@@ -1,6 +1,6 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WorkspaceTypertGenerator } from '../src/workspace.ts'
 
@@ -10,21 +10,22 @@ afterEach(() => {
 })
 
 function fixture(): { root: string; trusted: string } {
-  const root = mkdtempSync(join(tmpdir(), 'typert-external-registration-'))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'typert-external-registration-')))
   temporaryRoots.push(root)
   cpSync(resolve(import.meta.dirname, 'fixtures/remote-model'), root, { recursive: true })
-  const trusted = join(root, 'trusted-packages')
+  const trusted = join(dirname(root), `${basename(root)}-external-packages`)
+  temporaryRoots.push(trusted)
   const protocol = join(trusted, 'protocol')
   mkdirSync(join(protocol, 'src'), { recursive: true })
   const ambient = readFileSync(join(root, 'typert-protocol.d.ts'), 'utf8')
   writeFileSync(join(protocol, 'src/index.d.ts'), ambient.slice(ambient.indexOf('\n') + 1, ambient.lastIndexOf('}')))
   writeFileSync(join(protocol, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-typert-protocol', exports: { '.': './src/index.d.ts' } }))
-  writeFileSync(join(protocol, 'tsconfig.json'), JSON.stringify({ extends: '../../tsconfig.base.json', include: ['src'] }))
+  writeFileSync(join(protocol, 'tsconfig.json'), JSON.stringify({ extends: join(root, 'tsconfig.base.json'), include: ['src'] }))
   const config = JSON.parse(readFileSync(join(root, 'tsconfig.base.json'), 'utf8'))
-  config.compilerOptions.paths['@deepseek-ai/dsh-typert-protocol'] = ['./trusted-packages/protocol/src/index.d.ts']
+  config.compilerOptions.paths['@deepseek-ai/dsh-typert-protocol'] = [join(protocol, 'src/index.d.ts')]
   writeFileSync(join(root, 'tsconfig.base.json'), JSON.stringify(config))
   const aggregate = JSON.parse(readFileSync(join(root, 'tsconfig.host.json'), 'utf8'))
-  aggregate.references.push({ path: './trusted-packages/protocol' })
+  aggregate.references.push({ path: protocol })
   writeFileSync(join(root, 'tsconfig.host.json'), JSON.stringify(aggregate))
   renameSync(join(root, 'tsconfig.host.json'), join(root, 'external.host.json'))
   return { root, trusted }
@@ -33,8 +34,8 @@ function fixture(): { root: string; trusted: string } {
 describe('explicit additional package roots', { timeout: 60_000 }, () => {
   it('discovers the referenced external protocol only with an explicit trusted root and aggregate', () => {
     const { root, trusted } = fixture()
-    const without = new WorkspaceTypertGenerator(root, { hostConfig: 'external.host.json' }).generate(['@fixture/remote'], ['host'])
-    expect(without[0]?.remote).toBeUndefined()
+    const without = new WorkspaceTypertGenerator(root, { hostConfig: 'external.host.json' }).discover(['host'])
+    expect(without.map(pkg => pkg.package)).not.toContain('@deepseek-ai/dsh-typert-protocol')
     const withRoot = new WorkspaceTypertGenerator(root, { hostConfig: 'external.host.json', additionalPackageRoots: [trusted] })
       .generate(['@fixture/remote'], ['host'])
     expect(withRoot).toHaveLength(1)
@@ -47,7 +48,7 @@ describe('explicit additional package roots', { timeout: 60_000 }, () => {
     cpSync(join(trusted, 'protocol'), join(trusted, 'other-protocol'), { recursive: true })
     const path = join(root, 'external.host.json')
     const aggregate = JSON.parse(readFileSync(path, 'utf8'))
-    aggregate.references.push({ path: './trusted-packages/other-protocol' })
+    aggregate.references.push({ path: join(trusted, 'other-protocol') })
     writeFileSync(path, JSON.stringify(aggregate))
     expect(() => new WorkspaceTypertGenerator(root, { hostConfig: 'external.host.json', additionalPackageRoots: [trusted] })
       .generate(['@fixture/remote'], ['host'])).toThrow('conflicting roots')

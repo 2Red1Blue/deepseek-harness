@@ -637,6 +637,16 @@ export class WorkspaceAnalyzer {
   private checkProject(registration: PackageRegistration): void {
     if (this.checkedProjects.has(registration.config.path)) return
     this.checkedProjects.add(registration.config.path)
+    let diagnosticRoot = this.options.root
+    for (const root of this.options.additionalPackageRoots) {
+      while (!isWithin(root, diagnosticRoot)) {
+        const parent = dirname(diagnosticRoot)
+        if (parent === diagnosticRoot) {
+          throw new TypertAnalysisError('additional package roots must share one filesystem root with the workspace')
+        }
+        diagnosticRoot = parent
+      }
+    }
     const program = ts.createProgram({
       rootNames: registration.config.parsed.fileNames,
       options: {
@@ -647,7 +657,7 @@ export class WorkspaceAnalyzer {
         // Source-plane workspace aliases resolve referenced packages to source.
         // Widen only this diagnostic program's root so those imports do not
         // produce an artificial TS6059 before Typert checks the public edge.
-        rootDir: this.options.root,
+        rootDir: diagnosticRoot,
       },
     })
     const diagnostics = [

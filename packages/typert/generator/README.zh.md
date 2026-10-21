@@ -60,7 +60,7 @@ factory 返回类实例，并保留 spec，直到 `descriptors` 或 `methods` ge
 
 ### 静态分析工作区
 
-`WorkspaceAnalyzer` 与 `WorkspaceTypertGenerator` 接受显式的 `hostConfig`、`clientConfig` 聚合配置路径。受信的构建调用方可以传入 `additionalPackageRoots`，准入工作区 `packages/` 目录外、已被聚合配置引用的包。相对根路径从工作区根解析；包准入使用物理路径，并且仍要求聚合配置引用。该选项不会扫描目录、准入未列出的相邻目录、更改运行时权限，或放宽 Remote 身份识别、诊断与 `rejectBuildOutputs`。省略时保留原有发现范围。同一个 face 中两个物理根声明相同包名时会被拒绝。
+`WorkspaceAnalyzer` 与 `WorkspaceTypertGenerator` 接受显式的 `hostConfig`、`clientConfig` 聚合配置路径。受信的构建调用方可以传入 `additionalPackageRoots`，准入工作区 `packages/` 目录外、已被聚合配置引用的包。相对根路径从工作区根解析；包准入使用物理路径，并且仍要求聚合配置引用。该选项不会扫描目录、准入未列出的相邻目录、更改运行时权限，或放宽 Remote 身份识别、诊断与 `rejectBuildOutputs`。省略时保留原有发现范围。诊断程序使用工作区与显式根的共同祖先，不改变产物路径；这些目录必须共享文件系统根。同一个 face 中两个物理根声明相同包名时会被拒绝。
 
 静态消费方直接针对工作区的 `tsconfig.host.json` 与 `tsconfig.client.json` 聚合配置调用 `WorkspaceAnalyzer`，选择 face 与包子集，并在不生成或加载运行时产物的前提下读取生成的 `FaceModel` 与类型图。`analyzeInBatches()` 通过有界的编译器程序处理大批量包选择，模型形态保持一致；`discoverPackages()` 无需构建类型检查程序即可找出参与贡献的包，其可选的 `package.json` 谓词会在读取某个包的源码或项目配置之前就跳过该包。Typert 只解析它所分析的包的 tsconfig；校验每个被引用的 tsconfig 由之前运行的 `tsc -b` 负责。
 
